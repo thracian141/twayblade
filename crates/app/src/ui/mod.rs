@@ -4,6 +4,7 @@
 //! omitted rather than faked.
 
 // Areas of the main window.
+mod activity;
 mod chrome;
 #[cfg(all(test, feature = "capture"))]
 pub(crate) use chrome::account_label;
@@ -430,7 +431,9 @@ impl Render for MatrixApp {
                 }),
             )
             .on_action(cx.listener(|this, _: &CloseProfile, window, cx| {
-                if this.adding_account {
+                if this.notifications_open {
+                    this.close_notifications(window, cx);
+                } else if this.adding_account {
                     this.cancel_add_account(window, cx);
                 } else if this.call_fills_window() {
                     this.toggle_call_full_screen(window, cx);

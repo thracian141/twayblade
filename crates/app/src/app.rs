@@ -291,6 +291,10 @@ pub(super) struct MatrixApp {
     /// account; Cancel returns to the open one.
     pub(super) adding_account: bool,
     pub(super) add_account_focus: FocusHandle,
+    /// The title-bar notifications popover.
+    pub(crate) notifications_open: bool,
+    pub(crate) notifications_closed_at: Option<std::time::Instant>,
+    pub(crate) notifications_focus: FocusHandle,
     /// The room list column; the space rail stays visible (⌃⌘S).
     pub sidebar_open: bool,
     /// Room navigation history for Back/Forward (⌘[ / ⌘]).
@@ -678,6 +682,9 @@ impl MatrixApp {
             busy: !preview,
             adding_account: false,
             add_account_focus: cx.focus_handle(),
+            notifications_open: false,
+            notifications_closed_at: None,
+            notifications_focus: cx.focus_handle(),
             sidebar_open: true,
             history_back: Vec::new(),
             history_forward: Vec::new(),
