@@ -2694,3 +2694,38 @@ fn invite_contact_copies_a_matrix_to_link(cx: &mut TestAppContext) {
     })
     .expect("copy the contact link");
 }
+
+#[gpui_kit::test]
+fn selecting_composer_text_shows_a_format_bar_that_keeps_focus(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        let composer = app.read(cx).composer.clone();
+        composer.update(cx, |state, cx| {
+            state.set_value("ship the notes", window, cx);
+            state.set_selected_range(5..8, cx);
+            state.focus(window, cx);
+        });
+        // The bar anchors to the laid-out selection, so it appears once the
+        // composer has been laid out.
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(window.find("selection-format-bar").visible());
+        window.click("selection-format-0", cx);
+        window.render_frame(cx);
+        let state = composer.read(cx);
+        assert_eq!(state.value().as_ref(), "ship **the** notes");
+        assert!(
+            gpui::Focusable::focus_handle(state, cx).is_focused(window),
+            "the composer keeps focus"
+        );
+        assert!(
+            !state.selected_range().is_empty(),
+            "the selection stays for another format"
+        );
+        // Collapsing the selection hides the bar.
+        composer.update(cx, |state, cx| state.set_selected_range(0..0, cx));
+        window.render_frame(cx);
+        assert!(window.try_find("selection-format-bar").is_none());
+    })
+    .expect("format bar");
+}

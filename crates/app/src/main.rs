@@ -164,6 +164,13 @@ fn main() {
                         view.options = Some(backend::LoginOptions { homeserver: "matrix.example.org".into(), password: false, browser: false, sso: true, providers: vec![twayblade_core::IdentityProvider { id: "sample".into(), name: "Example Identity".into(), icon_png: None }] });
                         view.status = "Sample data · Choose your identity provider.".into();
                     }
+                    if args.iter().any(|arg| arg == "--preview-selection") {
+                        view.composer.update(cx, |state, cx| {
+                            state.set_value("Let's ship the release notes today", window, cx);
+                            state.set_selected_range(10..23, cx);
+                            state.focus(window, cx);
+                        });
+                    }
                     if args.iter().any(|arg| arg == "--preview-signed-out") {
                         view.snapshot.session_state = twayblade_core::auth::SessionState::HardLoggedOut;
                     }

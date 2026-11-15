@@ -279,6 +279,9 @@ pub(super) struct MatrixApp {
     pub password: Entity<InputState>,
     pub search: Entity<InputState>,
     pub composer: Entity<TextareaState>,
+    /// Formatting bars over selected text in the room and thread composers.
+    pub(crate) selection_bar: Entity<crate::ui::selection_bar::SelectionBar>,
+    pub(crate) thread_selection_bar: Entity<crate::ui::selection_bar::SelectionBar>,
     composers: HashMap<String, (Entity<TextareaState>, Subscription)>,
     pub scroller: Entity<MessageScrollerState>,
     pub focus: FocusHandle,
@@ -664,6 +667,10 @@ impl MatrixApp {
             username,
             password,
             search,
+            selection_bar: cx
+                .new(|cx| crate::ui::selection_bar::SelectionBar::new(composer.clone(), cx)),
+            thread_selection_bar: cx
+                .new(|cx| crate::ui::selection_bar::SelectionBar::new(composer.clone(), cx)),
             composer,
             composers: HashMap::new(),
             scroller,

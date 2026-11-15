@@ -7,6 +7,7 @@
 mod chrome;
 pub(crate) mod conversation;
 mod panels;
+pub(crate) mod selection_bar;
 mod sign_in;
 mod timeline;
 
