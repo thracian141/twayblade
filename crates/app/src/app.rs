@@ -287,6 +287,10 @@ pub(super) struct MatrixApp {
     pub(super) choosing_server: bool,
     pub status: String,
     pub busy: bool,
+    /// The title-bar notifications popover.
+    pub(crate) notifications_open: bool,
+    pub(crate) notifications_closed_at: Option<std::time::Instant>,
+    pub(crate) notifications_focus: FocusHandle,
     /// The room list column; the space rail stays visible (⌃⌘S).
     pub sidebar_open: bool,
     /// Room navigation history for Back/Forward (⌘[ / ⌘]).
@@ -672,6 +676,9 @@ impl MatrixApp {
             choosing_server: false,
             status: String::new(),
             busy: !preview,
+            notifications_open: false,
+            notifications_closed_at: None,
+            notifications_focus: cx.focus_handle(),
             sidebar_open: true,
             history_back: Vec::new(),
             history_forward: Vec::new(),

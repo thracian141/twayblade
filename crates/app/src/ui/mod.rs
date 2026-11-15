@@ -4,6 +4,7 @@
 //! omitted rather than faked.
 
 // Areas of the main window.
+mod activity;
 mod chrome;
 pub(crate) mod conversation;
 mod panels;
@@ -428,7 +429,9 @@ impl Render for MatrixApp {
                 }),
             )
             .on_action(cx.listener(|this, _: &CloseProfile, window, cx| {
-                if this.call_fills_window() {
+                if this.notifications_open {
+                    this.close_notifications(window, cx);
+                } else if this.call_fills_window() {
                     this.toggle_call_full_screen(window, cx);
                 } else if this.call_focus.is_some() && this.live_call().is_some() {
                     this.call_focus = None;

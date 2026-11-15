@@ -164,6 +164,11 @@ fn main() {
                         view.options = Some(backend::LoginOptions { homeserver: "matrix.example.org".into(), password: false, browser: false, sso: true, providers: vec![twayblade_core::IdentityProvider { id: "sample".into(), name: "Example Identity".into(), icon_png: None }] });
                         view.status = "Sample data · Choose your identity provider.".into();
                     }
+                    if args.iter().any(|arg| arg == "--preview-activity") {
+                        view.snapshot.invites = vec![twayblade_core::space_actions::Invite { id: "sample-room".into(), name: "Planning".into(), ..Default::default() }];
+                        for (room, mentions) in view.snapshot.rooms.iter_mut().zip([2u64, 0, 0, 1]) { room.mentions = mentions; room.unread = room.unread.max(mentions).max(1); }
+                        view.notifications_open = true;
+                    }
                     if args.iter().any(|arg| arg == "--preview-signed-out") {
                         view.snapshot.session_state = twayblade_core::auth::SessionState::HardLoggedOut;
                     }
