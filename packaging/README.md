@@ -7,6 +7,20 @@ signs, uploads or publishes.
   desktop entry and AppStream data for the deb, rpm, AUR and AppImage packages.
   The icon (`com.twayblade.desktop`) is not drawn yet, and the `matrix:` URI
   handler is left out until the app accepts a URI on launch.
+- `icons/com.twayblade.desktop.svg`: the app icon (source). `icons/render.sh`
+  regenerates the 512 px PNG and the Windows `twayblade.ico` from it. The
+  `.ico` is also embedded in `twayblade.exe` (`crates/app/twayblade.rc`).
+- Windows installer (#54): `windows/twayblade.wxs`, built by the Windows job
+  in `build.yml` with WiX 5 into `Twayblade-<version>-x86_64.msi`. Per-machine
+  install in Program Files with a Start menu shortcut carrying the
+  AppUserModelID `com.twayblade.desktop`, which Windows needs before it shows
+  the app's toast notifications. Major upgrades replace older versions (and a
+  pre-release of the same version). Unsigned. No MSIX: it cannot be
+  installed at all without a trusted signature. WiX 6 and later need a
+  decision on the Open Source Maintenance Fee EULA, so the build stays on 5.
+- `winget/`: manifest templates for `zerw0.Twayblade`. VERSION and SHA256 come
+  from a published release; submitting to winget-pkgs needs the signed MSI and
+  explicit authorization.
 - The Nix package (`nix/package.nix`) writes its own desktop entry; align it
   with these files when the first native package is built.
 - The macOS bundle comes from `macos/Info.plist` and `macos/build.sh`;
@@ -23,7 +37,7 @@ signs, uploads or publishes.
   person reviews and rewords the notes, then publishes; stable is a separate
   promotion. Pushing a tag needs explicit authorization.
 
-Still open: deb/rpm/AppImage build jobs, MSI/MSIX and winget, the tap
+Still open: deb/rpm/AppImage build jobs, MSI signing, winget submission, the tap
 repository, signing and notarisation (needs credentials and explicit
 authorization), promotion from pre-release to stable, and the in-app updater
 download path.
