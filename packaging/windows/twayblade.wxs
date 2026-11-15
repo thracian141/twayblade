@@ -49,9 +49,12 @@
             </Shortcut>
           </File>
         </Component>
-        <Component Id="Licenses" Bitness="always64">
+        <!-- One file per component, so WiX can derive stable component GUIDs. -->
+        <Component Id="License" Bitness="always64">
           <File Id="License" Source="$(var.Root)\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
-          <File Id="WebrtcLicense" Source="$(var.Root)\crates\media\licenses\libwebrtc-a545de4.md" Name="libwebrtc-LICENSE.md" />
+        </Component>
+        <Component Id="WebrtcLicense" Bitness="always64">
+          <File Id="WebrtcLicense" Source="$(var.Root)\crates\media\licenses\libwebrtc-a545de4.md" Name="libwebrtc-LICENSE.md" KeyPath="yes" />
         </Component>
       </Directory>
     </StandardDirectory>
@@ -59,7 +62,8 @@
 
     <Feature Id="Main" Title="Twayblade">
       <ComponentRef Id="App" />
-      <ComponentRef Id="Licenses" />
+      <ComponentRef Id="License" />
+      <ComponentRef Id="WebrtcLicense" />
     </Feature>
   </Package>
 </Wix>
