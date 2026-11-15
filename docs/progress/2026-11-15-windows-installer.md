@@ -36,7 +36,13 @@ Branch `feature/windows-installer`.
 
 - Compile on macOS: formatting and strict Clippy (the Windows resource step
   only runs for Windows targets).
-- Not verified: the MSI build itself (WiX runs only on Windows; it runs in the
-  build workflow on `main`, a tag or a manual run), installing, upgrading and
+- The build workflow, run manually on this branch, built the exe (with the
+  embedded icon) and `Twayblade-0.1.0-x86_64.msi`. Inspected with msitools:
+  `ALLUSERS=1`, the fixed UpgradeCode, the Apps & Features icon, the Start
+  menu shortcut with `System.AppUserModel.ID = com.twayblade.desktop`, the exe
+  and both licences in `Program Files\Twayblade`. The first build failed
+  because WiX cannot derive a GUID for a two-file component; the licences
+  are now one file per component.
+- Not verified: installing, upgrading and
   uninstalling on a clean Windows machine, the Start menu shortcut, toast
   delivery through it, the embedded icon and the absent console window.
