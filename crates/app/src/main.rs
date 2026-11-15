@@ -19,6 +19,9 @@ use app::{
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 
+/// The reverse-DNS ID shared by the desktop entry, AppStream data and icons.
+pub(crate) const APP_ID: &str = "com.twayblade.desktop";
+
 fn main() {
     if twayblade_platform::diagnostics::init().is_err() {
         eprintln!("Diagnostics could not start; logging is disabled.");
@@ -115,6 +118,8 @@ fn main() {
             })
             .detach();
             let options = WindowOptions {
+                // Linux desktops match the window to its desktop entry and icon by this ID.
+                app_id: Some(APP_ID.into()),
                 window_bounds: Some(WindowBounds::centered(size(px(1120.), px(760.)), cx)),
                 window_min_size: Some(size(px(820.), px(540.))),
                 // macOS: unified toolbar. The sidebar runs under the traffic lights and
@@ -170,6 +175,11 @@ fn main() {
                             state.set_selected_range(10..23, cx);
                             state.focus(window, cx);
                         });
+                    }
+                    if args.iter().any(|arg| arg == "--preview-activity") {
+                        view.snapshot.invites = vec![twayblade_core::space_actions::Invite { id: "sample-room".into(), name: "Planning".into(), ..Default::default() }];
+                        for (room, mentions) in view.snapshot.rooms.iter_mut().zip([2u64, 0, 0, 1]) { room.mentions = mentions; room.unread = room.unread.max(mentions).max(1); }
+                        view.notifications_open = true;
                     }
                     if args.iter().any(|arg| arg == "--preview-signed-out") {
                         view.snapshot.session_state = twayblade_core::auth::SessionState::HardLoggedOut;
