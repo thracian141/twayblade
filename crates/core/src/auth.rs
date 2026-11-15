@@ -700,7 +700,8 @@ fn install_session_callbacks(
     Ok(gate)
 }
 
-#[cfg(test)]
+// Only the macOS Keychain integration tests read credentials back.
+#[cfg(all(test, target_os = "macos"))]
 impl AuthContext {
     /// Test view of the saved credential: the first listed account's slot
     /// (including a pending sign-in), else the original single-session slot.

@@ -13,7 +13,7 @@ use matrix_sdk::{
 };
 use tokio::sync::watch;
 use url::Url;
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 use uuid::Uuid;
 
 // No Debug: the authorization URL and eventual callback are sensitive.

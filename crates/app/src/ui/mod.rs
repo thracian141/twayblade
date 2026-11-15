@@ -5,7 +5,7 @@
 
 // Areas of the main window.
 mod chrome;
-#[cfg(test)]
+#[cfg(all(test, feature = "capture"))]
 pub(crate) use chrome::account_label;
 pub(crate) mod conversation;
 mod panels;
