@@ -2812,6 +2812,34 @@ fn known_people_come_from_direct_conversations_most_recent_first() {
 }
 
 #[gpui_kit::test]
+fn explore_lists_public_rooms_and_switches_servers(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| app.open_explore(window, cx));
+        window.render_frame(cx);
+        assert!(window.find("explore-room-!matrix:example.org").visible());
+        // Joined rooms offer Open; knock-only rooms Ask to Join.
+        assert!(window.find("explore-join-!design:example.org").visible());
+        window.click("explore-server-matrix.org", cx);
+    })
+    .expect("explore");
+    cx.update(|cx| assert_eq!(app.read(cx).explore_server.as_deref(), Some("matrix.org")));
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("explore-join-!design:example.org", cx);
+    })
+    .expect("open a joined room");
+    cx.update(|cx| {
+        let app = app.read(cx);
+        assert!(app.management.is_none());
+        assert_eq!(
+            app.navigation.selected_room.as_deref(),
+            Some("!design:example.org")
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn direct_message_dialog_reopens_a_known_conversation(cx: &mut TestAppContext) {
     let (window, app) = preview_window(cx);
     cx.update_window(window, |_, window, cx| {

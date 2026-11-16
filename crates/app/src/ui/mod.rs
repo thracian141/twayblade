@@ -10,6 +10,7 @@ mod chrome;
 pub(crate) use chrome::account_label;
 pub(crate) mod avatar_viewer;
 pub(crate) mod conversation;
+pub(crate) mod explore;
 mod panels;
 pub(crate) mod selection_bar;
 mod sign_in;

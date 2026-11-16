@@ -779,6 +779,17 @@ impl MatrixApp {
                 let sign_out = weak.clone();
                 menu.separator()
                     .item(
+                        PopupMenuItem::new("Explore Public Rooms…")
+                            .icon(IconName::Compass)
+                            .on_click({
+                                let explore = weak.clone();
+                                move |_, window, cx| {
+                                    let _ = explore
+                                        .update(cx, |this, cx| this.open_explore(window, cx));
+                                }
+                            }),
+                    )
+                    .item(
                         PopupMenuItem::new("Create Room…")
                             .icon(IconName::MessageSquarePlus)
                             .on_click(move |_, window, cx| {

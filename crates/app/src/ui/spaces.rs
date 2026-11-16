@@ -36,6 +36,8 @@ pub(crate) enum ManageKind {
     SignOut,
     /// Set or change your status message.
     StatusMessage,
+    /// Public rooms of your server or a large public homeserver.
+    Explore,
 }
 impl ManageKind {
     /// Short forms open as a small centred dialog; browsing and leaving keep
@@ -122,15 +124,14 @@ impl MatrixApp {
             })
             .flatten()
             .unwrap_or_default();
-        let status_dialog = matches!(kind, ManageKind::StatusMessage);
         let name = cx.new(|cx| {
             let input = InputState::new(window, cx);
-            if status_dialog {
-                input
+            match kind {
+                ManageKind::StatusMessage => input
                     .placeholder("What are you up to?")
-                    .default_value(current_status)
-            } else {
-                input
+                    .default_value(current_status),
+                ManageKind::Explore => input.placeholder("Search rooms by name or topic"),
+                _ => input,
             }
         });
         let topic = cx.new(|cx| InputState::new(window, cx));
@@ -140,7 +141,19 @@ impl MatrixApp {
                 cx.subscribe_in(
                     input,
                     window,
-                    |_, _, _: &gpui_kit::component::input::InputEvent, _, cx| cx.notify(),
+                    |this, _, event: &gpui_kit::component::input::InputEvent, window, cx| {
+                        // Explore searches the directory as you type; the
+                        // backend debounces and drops superseded queries.
+                        if matches!(event, gpui_kit::component::input::InputEvent::Change)
+                            && this
+                                .management
+                                .as_ref()
+                                .is_some_and(|page| matches!(page.kind, ManageKind::Explore))
+                        {
+                            this.explore_search(window, cx);
+                        }
+                        cx.notify()
+                    },
                 )
             })
             .collect();
@@ -181,9 +194,8 @@ impl MatrixApp {
                 | ManageKind::Dm
                 | ManageKind::JoinSpace
                 | ManageKind::InviteMember(_)
-                | ManageKind::StatusMessage => {
-                    page.name.update(cx, |state, cx| state.focus(window, cx))
-                }
+                | ManageKind::StatusMessage
+                | ManageKind::Explore => page.name.update(cx, |state, cx| state.focus(window, cx)),
                 ManageKind::LeaveRoom(_) | ManageKind::InviteContact | ManageKind::SignOut => {
                     page.focus.focus(window, cx)
                 }
@@ -453,6 +465,7 @@ impl MatrixApp {
             ManageKind::InviteContact => "Invite a Contact",
             ManageKind::SignOut => "Sign Out",
             ManageKind::StatusMessage => "Status Message",
+            ManageKind::Explore => "Explore Rooms",
         }
     }
 
@@ -941,6 +954,9 @@ impl MatrixApp {
                                 );
                             })),
                     );
+            }
+            ManageKind::Explore => {
+                body = body.child(self.explore_body(cx));
             }
             ManageKind::StatusMessage => {
                 use twayblade_core::presence::State;

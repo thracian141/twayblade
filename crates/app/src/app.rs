@@ -439,6 +439,8 @@ pub(super) struct MatrixApp {
     pub viewer: Option<crate::ui::viewer::Viewer>,
     /// A profile picture shown full size over the window.
     pub(crate) avatar_viewer: Option<crate::ui::avatar_viewer::AvatarViewer>,
+    /// Explore Rooms: the public server being browsed; None is your own.
+    pub(crate) explore_server: Option<String>,
     pub viewer_request: u64,
     pub reveal_image: Option<String>,
     pub image_focus: std::cell::RefCell<HashMap<String, FocusHandle>>,
@@ -839,6 +841,7 @@ impl MatrixApp {
             directory_action_request: 0,
             viewer: None,
             avatar_viewer: None,
+            explore_server: None,
             viewer_request: 0,
             reveal_image: None,
             image_focus: std::cell::RefCell::new(HashMap::new()),
@@ -2550,7 +2553,8 @@ impl MatrixApp {
                 | ManageKind::LeaveRoom(_)
                 | ManageKind::InviteContact
                 | ManageKind::SignOut
-                | ManageKind::StatusMessage => {}
+                | ManageKind::StatusMessage
+                | ManageKind::Explore => {}
             }
         }
         let panel = if self.search_open {
