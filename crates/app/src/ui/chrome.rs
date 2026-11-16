@@ -909,46 +909,6 @@ impl MatrixApp {
             .into_any_element()
     }
 
-    pub(crate) fn search_messages_row(&self, query: &str, cx: &mut Context<Self>) -> AnyElement {
-        Button::new("search-messages")
-            .ghost()
-            .w_full()
-            .h(px(30.))
-            .px(px(8.))
-            .justify_start()
-            .accessibility_label(format!("Search messages for {query}"))
-            .child(
-                h_flex()
-                    .w_full()
-                    .gap(px(8.))
-                    .child(
-                        Icon::new(IconName::Search)
-                            .size(px(14.))
-                            .text_color(cx.theme().muted_foreground),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_left()
-                            .child(format!("Search messages for “{query}”")),
-                    )
-                    .child(
-                        div()
-                            .px(px(4.))
-                            .rounded(px(4.))
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .text_size(px(10.5))
-                            .text_color(cx.theme().muted_foreground)
-                            .child("↩"),
-                    ),
-            )
-            .on_click(cx.listener(|this, _, window, cx| this.run_message_search(window, cx)))
-            .into_any_element()
-    }
-
     pub(crate) fn sidebar_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let query = self.search.read(cx).value().to_lowercase();
@@ -991,11 +951,6 @@ impl MatrixApp {
             .track_scroll(&self.sidebar_scroll);
         // Direct children so far; the Archive is scrolled to by its index.
         let mut children = 0;
-        let typed = self.search.read(cx).value().trim().to_owned();
-        if !typed.is_empty() {
-            list = list.child(div().pt(px(6.)).child(self.search_messages_row(&typed, cx)));
-            children += 1;
-        }
         if !self.snapshot.invites.is_empty() {
             list = list.child(self.invite_section(cx));
             children += 1;

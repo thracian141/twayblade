@@ -1075,6 +1075,31 @@ fn title_search_offers_message_search_and_opens_the_panel(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn search_panel_shows_recent_conversations_and_opens_a_match(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestEventExt;
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.within("title-search").click("input-state", cx);
+        window.render_frame(cx);
+        // An empty field shows recent conversations and where else to look.
+        assert!(window.find("spotlight").visible());
+        assert!(window.find("spotlight-recent").visible());
+        window.input("crit", cx);
+        window.render_frame(cx);
+        assert!(window.find("search-messages").visible());
+        window.key_down("enter", false, cx);
+    })
+    .expect("search for a conversation");
+    cx.update(|cx| {
+        let app = app.read(cx);
+        assert_eq!(app.navigation.selected_room.as_deref(), Some("critique"));
+        assert!(app.search.read(cx).value().is_empty());
+        assert!(!app.spotlight_open);
+    });
+}
+
+#[gpui_kit::test]
 fn system_accent_updates_primary_buttons_and_selection_in_both_appearances(
     cx: &mut TestAppContext,
 ) {

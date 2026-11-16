@@ -446,6 +446,13 @@ pub(super) struct MatrixApp {
     /// Per room, like the drafts they belong to.
     pub(crate) mentions: HashMap<String, Vec<twayblade_core::rich_text::Mention>>,
     pub(crate) thread_mentions: Vec<twayblade_core::rich_text::Mention>,
+    /// The search panel under the title-bar field, and its selected row.
+    pub(crate) spotlight_open: bool,
+    pub(crate) spotlight_selected: usize,
+    /// A press inside the panel: the field's blur must not close it.
+    pub(crate) spotlight_pointer: bool,
+    /// Conversations opened recently, newest first (this session).
+    pub(crate) recent_room_ids: Vec<String>,
     pub viewer_request: u64,
     pub reveal_image: Option<String>,
     pub image_focus: std::cell::RefCell<HashMap<String, FocusHandle>>,
@@ -582,9 +589,23 @@ impl MatrixApp {
             &search,
             window,
             |this, _, event: &InputEvent, window, cx| {
-                // Typing filters conversations; Return searches messages.
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.run_message_search(window, cx);
+                // Focus opens the search panel; typing filters it (and the
+                // sidebar); Return opens the selected row.
+                match event {
+                    InputEvent::Focus => {
+                        this.spotlight_open = true;
+                        this.spotlight_selected = 0;
+                    }
+                    InputEvent::Change => {
+                        this.spotlight_open = true;
+                        this.spotlight_selected = 0;
+                    }
+                    InputEvent::Blur => {
+                        if !this.spotlight_pointer {
+                            this.spotlight_open = false;
+                        }
+                    }
+                    InputEvent::PressEnter { .. } => this.spotlight_enter(window, cx),
                 }
                 cx.notify()
             },
@@ -850,6 +871,10 @@ impl MatrixApp {
             mention_completion: None,
             mentions: HashMap::new(),
             thread_mentions: Vec::new(),
+            spotlight_open: false,
+            spotlight_selected: 0,
+            spotlight_pointer: false,
+            recent_room_ids: Vec::new(),
             viewer_request: 0,
             reveal_image: None,
             image_focus: std::cell::RefCell::new(HashMap::new()),
@@ -1703,6 +1728,7 @@ impl MatrixApp {
     }
 
     pub fn select_room(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.note_recent_room(&id);
         // Opening the room answers its missed calls.
         if let Some(backend) = &self.backend
             && self
