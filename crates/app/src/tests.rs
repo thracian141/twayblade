@@ -2776,6 +2776,28 @@ fn screen_picker_lists_sources_and_opens_from_the_share_button(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn status_message_dialog_opens_on_the_current_status(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.snapshot.own_presence = Some(twayblade_core::presence::Presence {
+                state: twayblade_core::presence::State::Online,
+                status_msg: Some("At the conference".into()),
+                last_active_ms: None,
+            });
+            app.open_management(crate::ui::spaces::ManageKind::StatusMessage, window, cx)
+        });
+        window.render_frame(cx);
+        assert!(window.find("status-save").visible());
+        // With a status set, it can also be cleared from here.
+        assert!(window.find("status-clear").visible());
+        let page = app.read(cx).management.as_ref().unwrap();
+        assert_eq!(page.name.read(cx).value(), "At the conference");
+    })
+    .expect("status dialog");
+}
+
+#[gpui_kit::test]
 fn profile_picture_opens_full_size_and_closes(cx: &mut TestAppContext) {
     let (window, app) = preview_window(cx);
     cx.update_window(window, |_, window, cx| {

@@ -2549,7 +2549,8 @@ impl MatrixApp {
                 | ManageKind::InviteMember(_)
                 | ManageKind::LeaveRoom(_)
                 | ManageKind::InviteContact
-                | ManageKind::SignOut => {}
+                | ManageKind::SignOut
+                | ManageKind::StatusMessage => {}
             }
         }
         let panel = if self.search_open {

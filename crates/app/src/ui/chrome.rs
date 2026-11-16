@@ -691,6 +691,26 @@ impl MatrixApp {
                                 }),
                         );
                     }
+                    {
+                        let weak = weak.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(if status_msg.is_some() {
+                                "Change Status Message…"
+                            } else {
+                                "Set Status Message…"
+                            })
+                            .icon(IconName::MessageSquareText)
+                            .on_click(move |_, window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::StatusMessage,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                        );
+                    }
                     if status_msg.is_some() {
                         let weak = weak.clone();
                         menu = menu.item(
