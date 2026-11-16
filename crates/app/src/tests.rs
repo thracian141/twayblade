@@ -2776,6 +2776,40 @@ fn screen_picker_lists_sources_and_opens_from_the_share_button(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn profile_picture_opens_full_size_and_closes(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_avatar_viewer(
+                "mxc://example.org/avatar".into(),
+                "Alex".into(),
+                window,
+                cx,
+            )
+        });
+        window.render_frame(cx);
+        // Offline there is no media service, so the picture reports failure
+        // instead of loading forever.
+        assert!(window.find("avatar-viewer").visible());
+        assert!(matches!(
+            app.read(cx).avatar_viewer.as_ref().map(|v| &v.load),
+            Some(crate::ui::avatar_viewer::AvatarLoad::Failed)
+        ));
+        window.click("avatar-viewer-close", cx);
+    })
+    .expect("open and close");
+    cx.update(|cx| assert!(app.read(cx).avatar_viewer.is_none()));
+    // Only Matrix media URLs open.
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_avatar_viewer("https://example.org/a.png".into(), "Alex".into(), window, cx)
+        });
+    })
+    .expect("refuse");
+    cx.update(|cx| assert!(app.read(cx).avatar_viewer.is_none()));
+}
+
+#[gpui_kit::test]
 fn invite_tile_opens_the_invite_dialog_for_the_selected_room(cx: &mut TestAppContext) {
     let (window, app) = preview_window(cx);
     cx.update_window(window, |_, window, cx| {

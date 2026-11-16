@@ -11,6 +11,7 @@ pub(crate) use chrome::account_label;
 pub(crate) mod conversation;
 mod panels;
 pub(crate) mod selection_bar;
+pub(crate) mod avatar_viewer;
 mod sign_in;
 mod timeline;
 
@@ -391,7 +392,11 @@ impl Render for MatrixApp {
         };
         // The sidebar applied the Archive scroll while building `content`.
         self.reveal_archive = false;
-        let overlay = self.viewer.as_ref().map(|_| self.viewer_view(window, cx));
+        let overlay = if self.avatar_viewer.is_some() {
+            Some(self.avatar_viewer_view(window, cx))
+        } else {
+            self.viewer.as_ref().map(|_| self.viewer_view(window, cx))
+        };
         let workspace = !self.security_open
             && !self.snapshot.user_id.is_empty()
             && self.snapshot.session_state == twayblade_core::auth::SessionState::Active;
