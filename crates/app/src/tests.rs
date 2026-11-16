@@ -2780,12 +2780,7 @@ fn profile_picture_opens_full_size_and_closes(cx: &mut TestAppContext) {
     let (window, app) = preview_window(cx);
     cx.update_window(window, |_, window, cx| {
         app.update(cx, |app, cx| {
-            app.open_avatar_viewer(
-                "mxc://example.org/avatar".into(),
-                "Alex".into(),
-                window,
-                cx,
-            )
+            app.open_avatar_viewer("mxc://example.org/avatar".into(), "Alex".into(), window, cx)
         });
         window.render_frame(cx);
         // Offline there is no media service, so the picture reports failure
@@ -2802,7 +2797,12 @@ fn profile_picture_opens_full_size_and_closes(cx: &mut TestAppContext) {
     // Only Matrix media URLs open.
     cx.update_window(window, |_, window, cx| {
         app.update(cx, |app, cx| {
-            app.open_avatar_viewer("https://example.org/a.png".into(), "Alex".into(), window, cx)
+            app.open_avatar_viewer(
+                "https://example.org/a.png".into(),
+                "Alex".into(),
+                window,
+                cx,
+            )
         });
     })
     .expect("refuse");

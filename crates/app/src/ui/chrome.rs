@@ -223,27 +223,33 @@ impl MatrixApp {
                         let leave = leave_id.clone();
                         let view = weak.clone();
                         let leave_view = weak.clone();
-                        menu.item(PopupMenuItem::new("Browse rooms").on_click(
-                            move |_, window, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    this.open_management(
-                                        crate::ui::spaces::ManageKind::Directory(browse.clone()),
-                                        window,
-                                        cx,
-                                    )
-                                });
-                            },
-                        ))
+                        menu.item(
+                            PopupMenuItem::new("Browse rooms")
+                                .icon(IconName::Compass)
+                                .on_click(move |_, window, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.open_management(
+                                            crate::ui::spaces::ManageKind::Directory(
+                                                browse.clone(),
+                                            ),
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                }),
+                        )
                         .item(
-                            PopupMenuItem::new("Leave space…").on_click(move |_, window, cx| {
-                                let _ = leave_view.update(cx, |this, cx| {
-                                    this.open_management(
-                                        crate::ui::spaces::ManageKind::Leave(leave.clone()),
-                                        window,
-                                        cx,
-                                    )
-                                });
-                            }),
+                            PopupMenuItem::new("Leave space…")
+                                .icon(IconName::LogOut)
+                                .on_click(move |_, window, cx| {
+                                    let _ = leave_view.update(cx, |this, cx| {
+                                        this.open_management(
+                                            crate::ui::spaces::ManageKind::Leave(leave.clone()),
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                }),
                         )
                     }),
             );
@@ -384,6 +390,11 @@ impl MatrixApp {
                         } else {
                             "Add to Favourites"
                         })
+                        .icon(if favourite {
+                            IconName::StarOff
+                        } else {
+                            IconName::Star
+                        })
                         .on_click(move |_, window, cx| {
                             let _ = favourite_view.update(cx, |this, cx| {
                                 this.set_favourite(favourite_room.clone(), !favourite, window, cx)
@@ -394,13 +405,15 @@ impl MatrixApp {
                 if !has_unread {
                     let unread_view = weak.clone();
                     let unread_room = room_id.clone();
-                    menu = menu.item(PopupMenuItem::new("Mark as unread").on_click(
-                        move |_, window, cx| {
-                            let _ = unread_view.update(cx, |this, cx| {
-                                this.set_unread(unread_room.clone(), window, cx)
-                            });
-                        },
-                    ));
+                    menu = menu.item(
+                        PopupMenuItem::new("Mark as unread")
+                            .icon(IconName::Mail)
+                            .on_click(move |_, window, cx| {
+                                let _ = unread_view.update(cx, |this, cx| {
+                                    this.set_unread(unread_room.clone(), window, cx)
+                                });
+                            }),
+                    );
                 }
                 let archive_view = weak.clone();
                 let archive_room = room_id.clone();
@@ -409,6 +422,11 @@ impl MatrixApp {
                         "Move out of Archive"
                     } else {
                         "Archive"
+                    })
+                    .icon(if archived {
+                        IconName::ArchiveRestore
+                    } else {
+                        IconName::Archive
                     })
                     .on_click(move |_, window, cx| {
                         let _ = archive_view.update(cx, |this, cx| {
@@ -419,15 +437,21 @@ impl MatrixApp {
                 let leave_view = weak.clone();
                 let leave_room = room_id.clone();
                 menu = menu
-                    .item(PopupMenuItem::new("Leave…").on_click(move |_, window, cx| {
-                        let _ = leave_view.update(cx, |this, cx| {
-                            this.open_management(
-                                crate::ui::spaces::ManageKind::LeaveRoom(leave_room.clone()),
-                                window,
-                                cx,
-                            )
-                        });
-                    }))
+                    .item(
+                        PopupMenuItem::new("Leave…")
+                            .icon(IconName::LogOut)
+                            .on_click(move |_, window, cx| {
+                                let _ = leave_view.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::LeaveRoom(
+                                            leave_room.clone(),
+                                        ),
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                    )
                     .separator();
                 if !available {
                     return menu;
@@ -629,20 +653,25 @@ impl MatrixApp {
                 let add = weak.clone();
                 menu = menu
                     .item(
-                        PopupMenuItem::new("Add Account…").on_click(move |_, window, cx| {
-                            let _ = add.update(cx, |this, cx| this.begin_add_account(window, cx));
-                        }),
+                        PopupMenuItem::new("Add Account…")
+                            .icon(IconName::UserRoundPlus)
+                            .on_click(move |_, window, cx| {
+                                let _ =
+                                    add.update(cx, |this, cx| this.begin_add_account(window, cx));
+                            }),
                     )
                     .separator();
                 let profile = weak.clone();
                 let id = user.clone();
-                menu = menu.item(PopupMenuItem::new("Your Profile").on_click(
-                    move |_, window, cx| {
-                        let _ = profile.update(cx, |this, cx| {
-                            this.open_profile(id.clone(), "You".into(), window, cx)
-                        });
-                    },
-                ));
+                menu = menu.item(
+                    PopupMenuItem::new("Your Profile")
+                        .icon(IconName::CircleUser)
+                        .on_click(move |_, window, cx| {
+                            let _ = profile.update(cx, |this, cx| {
+                                this.open_profile(id.clone(), "You".into(), window, cx)
+                            });
+                        }),
+                );
                 if enabled {
                     menu = menu.separator();
                     for (label, state) in [
@@ -664,18 +693,20 @@ impl MatrixApp {
                     }
                     if status_msg.is_some() {
                         let weak = weak.clone();
-                        menu = menu.item(PopupMenuItem::new("Clear Status Message").on_click(
-                            move |_, window, cx| {
-                                let _ = weak.update(cx, |this, cx| {
-                                    let state = this
-                                        .snapshot
-                                        .own_presence
-                                        .as_ref()
-                                        .map_or(State::Online, |presence| presence.state);
-                                    this.set_presence(state, None, window, cx)
-                                });
-                            },
-                        ));
+                        menu = menu.item(
+                            PopupMenuItem::new("Clear Status Message")
+                                .icon(IconName::MessageSquareX)
+                                .on_click(move |_, window, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        let state = this
+                                            .snapshot
+                                            .own_presence
+                                            .as_ref()
+                                            .map_or(State::Online, |presence| presence.state);
+                                        this.set_presence(state, None, window, cx)
+                                    });
+                                }),
+                        );
                     }
                 }
                 let create = weak.clone();
@@ -686,36 +717,47 @@ impl MatrixApp {
                 let sign_out = weak.clone();
                 menu.separator()
                     .item(
-                        PopupMenuItem::new("Create Room…").on_click(move |_, window, cx| {
-                            let _ = create.update(cx, |this, cx| {
-                                this.open_management(
-                                    crate::ui::spaces::ManageKind::Create,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        }),
+                        PopupMenuItem::new("Create Room…")
+                            .icon(IconName::MessageSquarePlus)
+                            .on_click(move |_, window, cx| {
+                                let _ = create.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::Create,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
                     )
-                    .item(PopupMenuItem::new("Start a Direct Message…").on_click(
-                        move |_, window, cx| {
-                            let _ = dm.update(cx, |this, cx| {
-                                this.open_management(crate::ui::spaces::ManageKind::Dm, window, cx)
-                            });
-                        },
-                    ))
                     .item(
-                        PopupMenuItem::new("Invite a Contact…").on_click(move |_, window, cx| {
-                            let _ = invite.update(cx, |this, cx| {
-                                this.open_management(
-                                    crate::ui::spaces::ManageKind::InviteContact,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        }),
+                        PopupMenuItem::new("Start a Direct Message…")
+                            .icon(IconName::MessageCirclePlus)
+                            .on_click(move |_, window, cx| {
+                                let _ = dm.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::Dm,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Invite a Contact…")
+                            .icon(IconName::Send)
+                            .on_click(move |_, window, cx| {
+                                let _ = invite.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::InviteContact,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
                     )
                     .item(
                         PopupMenuItem::new("Archive")
+                            .icon(IconName::Archive)
                             .disabled(!has_archive)
                             .on_click(move |_, window, cx| {
                                 let _ =
@@ -724,23 +766,27 @@ impl MatrixApp {
                     )
                     .separator()
                     .item(
-                        PopupMenuItem::new("Account Settings…").on_click(move |_, _, cx| {
-                            let _ = settings.update(cx, |this, cx| {
-                                this.open_settings(crate::ui::settings::Section::Account, cx)
-                            });
-                        }),
+                        PopupMenuItem::new("Account Settings…")
+                            .icon(IconName::Settings)
+                            .on_click(move |_, _, cx| {
+                                let _ = settings.update(cx, |this, cx| {
+                                    this.open_settings(crate::ui::settings::Section::Account, cx)
+                                });
+                            }),
                     )
-                    .item(PopupMenuItem::new(sign_out_label.clone()).on_click(
-                        move |_, window, cx| {
-                            let _ = sign_out.update(cx, |this, cx| {
-                                this.open_management(
-                                    crate::ui::spaces::ManageKind::SignOut,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        },
-                    ))
+                    .item(
+                        PopupMenuItem::new(sign_out_label.clone())
+                            .icon(IconName::LogOut)
+                            .on_click(move |_, window, cx| {
+                                let _ = sign_out.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::SignOut,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                    )
             })
             .into_any_element()
     }

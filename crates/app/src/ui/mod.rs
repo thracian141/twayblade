@@ -8,10 +8,10 @@ mod activity;
 mod chrome;
 #[cfg(all(test, feature = "capture"))]
 pub(crate) use chrome::account_label;
+pub(crate) mod avatar_viewer;
 pub(crate) mod conversation;
 mod panels;
 pub(crate) mod selection_bar;
-pub(crate) mod avatar_viewer;
 mod sign_in;
 mod timeline;
 
