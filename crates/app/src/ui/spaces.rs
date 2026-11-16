@@ -122,10 +122,16 @@ impl MatrixApp {
             })
             .flatten()
             .unwrap_or_default();
+        let status_dialog = matches!(kind, ManageKind::StatusMessage);
         let name = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("What are you up to?")
-                .default_value(current_status)
+            let input = InputState::new(window, cx);
+            if status_dialog {
+                input
+                    .placeholder("What are you up to?")
+                    .default_value(current_status)
+            } else {
+                input
+            }
         });
         let topic = cx.new(|cx| InputState::new(window, cx));
         let subscriptions = [&name, &topic]
