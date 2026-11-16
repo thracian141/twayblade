@@ -609,6 +609,7 @@ fn set_request(
                 }
                 VerificationRequestState::Done => {
                     publish_phase(&updates, request.flow_id(), VerificationPhase::Done);
+                    after_verification(&client, &updates).await;
                     return;
                 }
                 VerificationRequestState::Cancelled(_) => {
@@ -655,8 +656,7 @@ async fn watch_sas(
         let cancelled = phase == VerificationPhase::Cancelled;
         publish_phase(&updates, &id, phase);
         if done {
-            let _ = Security::download_keys_for_client(&client).await;
-            let _ = refresh(&client, &updates, true).await;
+            after_verification(&client, &updates).await;
             return;
         }
         if cancelled {
@@ -668,6 +668,29 @@ async fn watch_sas(
         state = next;
     }
 }
+/// Waits between server checks after a verification finishes: the other
+/// device uploads its signature for this one only after its own Done.
+const VERIFIED_RETRIES: [std::time::Duration; 4] = [
+    std::time::Duration::ZERO,
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(5),
+    std::time::Duration::from_secs(10),
+];
+
+/// Publishes the new verified state first, so the prompt and notice clear at
+/// once, and only then downloads backed-up keys, which can take minutes.
+async fn after_verification(client: &Client, updates: &watch::Sender<SecuritySnapshot>) {
+    for wait in VERIFIED_RETRIES {
+        tokio::time::sleep(wait).await;
+        if refresh(client, updates, true).await.is_ok() && updates.borrow().verified {
+            break;
+        }
+    }
+    if Security::download_keys_for_client(client).await.is_ok() {
+        let _ = refresh(client, updates, false).await;
+    }
+}
+
 impl Security {
     async fn download_keys_for_client(client: &Client) -> Result<(), SecurityError> {
         let backups = client.encryption().backups();

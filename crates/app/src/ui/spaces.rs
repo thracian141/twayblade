@@ -34,6 +34,8 @@ pub(crate) enum ManageKind {
     InviteContact,
     /// Confirm signing the open account out of this device.
     SignOut,
+    /// Set or change your status message.
+    StatusMessage,
 }
 impl ManageKind {
     /// Short forms open as a small centred dialog; browsing and leaving keep
@@ -48,6 +50,7 @@ impl ManageKind {
                 | Self::LeaveRoom(_)
                 | Self::InviteContact
                 | Self::SignOut
+                | Self::StatusMessage
         )
     }
 }
@@ -109,7 +112,27 @@ impl MatrixApp {
                     .iter()
                     .any(|s| &s.id == id && s.can_add_rooms)
             });
-        let name = cx.new(|cx| InputState::new(window, cx));
+        // The status dialog opens on the current status, ready to edit.
+        let current_status = matches!(kind, ManageKind::StatusMessage)
+            .then(|| {
+                self.snapshot
+                    .own_presence
+                    .as_ref()
+                    .and_then(|presence| presence.status_msg.clone())
+            })
+            .flatten()
+            .unwrap_or_default();
+        let status_dialog = matches!(kind, ManageKind::StatusMessage);
+        let name = cx.new(|cx| {
+            let input = InputState::new(window, cx);
+            if status_dialog {
+                input
+                    .placeholder("What are you up to?")
+                    .default_value(current_status)
+            } else {
+                input
+            }
+        });
         let topic = cx.new(|cx| InputState::new(window, cx));
         let subscriptions = [&name, &topic]
             .into_iter()
@@ -157,7 +180,8 @@ impl MatrixApp {
                 ManageKind::Create
                 | ManageKind::Dm
                 | ManageKind::JoinSpace
-                | ManageKind::InviteMember(_) => {
+                | ManageKind::InviteMember(_)
+                | ManageKind::StatusMessage => {
                     page.name.update(cx, |state, cx| state.focus(window, cx))
                 }
                 ManageKind::LeaveRoom(_) | ManageKind::InviteContact | ManageKind::SignOut => {
@@ -428,6 +452,7 @@ impl MatrixApp {
             ManageKind::LeaveRoom(_) => "Leave Room",
             ManageKind::InviteContact => "Invite a Contact",
             ManageKind::SignOut => "Sign Out",
+            ManageKind::StatusMessage => "Status Message",
         }
     }
 
@@ -912,6 +937,65 @@ impl MatrixApp {
                             })),
                     );
             }
+            ManageKind::StatusMessage => {
+                use twayblade_core::presence::State;
+                let length = page.name.read(cx).value().trim().chars().count();
+                let too_long = length > STATUS_LIMIT;
+                body = body
+                    .child("Shown next to your name to people who share a room with you.")
+                    .child(
+                        div()
+                            .w_full()
+                            .child(Input::new(&page.name).aria_label("Status message")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(if too_long {
+                                crate::theme::palette(cx).error
+                            } else {
+                                cx.theme().muted_foreground
+                            })
+                            .child(format!("{length} / {STATUS_LIMIT}")),
+                    );
+                let had_status = self
+                    .snapshot
+                    .own_presence
+                    .as_ref()
+                    .is_some_and(|presence| presence.status_msg.is_some());
+                let state = self
+                    .snapshot
+                    .own_presence
+                    .as_ref()
+                    .map_or(State::Online, |presence| presence.state);
+                let input = page.name.clone();
+                body = body.child(
+                    h_flex()
+                        .gap(px(8.))
+                        .child(
+                            Button::new("status-save")
+                                .primary()
+                                .label("Save")
+                                .disabled(self.preview || too_long || length == 0)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let text = input.read(cx).value().trim().to_owned();
+                                    this.set_presence(state, Some(text), window, cx);
+                                    this.close_management_page(window, cx);
+                                })),
+                        )
+                        .when(had_status, |row| {
+                            row.child(
+                                Button::new("status-clear")
+                                    .label("Clear")
+                                    .disabled(self.preview)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.set_presence(state, None, window, cx);
+                                        this.close_management_page(window, cx);
+                                    })),
+                            )
+                        }),
+                );
+            }
             ManageKind::Dm | ManageKind::JoinSpace => {
                 let dm = matches!(page.kind, ManageKind::Dm);
                 body =
@@ -998,6 +1082,9 @@ impl MatrixApp {
             .into_any_element()
     }
 }
+
+/// Matches core's presence limit, so Save is disabled before core refuses.
+const STATUS_LIMIT: usize = 256;
 
 /// A matrix.to link to a user, the address every Matrix client opens.
 pub(crate) fn contact_link(user: &str) -> String {

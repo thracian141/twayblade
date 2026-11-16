@@ -1182,19 +1182,40 @@ impl MatrixApp {
             .as_ref()
             .map(|profile| profile.display_name.clone())
             .unwrap_or_else(|| page.name.clone());
+        let avatar = self.avatar_image(
+            self.member_avatar(&profile_id),
+            &profile_id,
+            &name,
+            64.,
+            32.,
+            cx,
+        );
+        // With a picture, the avatar opens it full size; initials stay inert.
+        let avatar = match self.member_avatar(&profile_id).map(str::to_owned) {
+            Some(mxc) if mxc.starts_with("mxc://") => {
+                let title = name.clone();
+                div()
+                    .id("profile-avatar")
+                    .role(Role::Button)
+                    .aria_label(format!("View profile picture of {name}"))
+                    .test_support()
+                    .rounded_full()
+                    .cursor_pointer()
+                    .hover(|style| style.opacity(0.85))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_avatar_viewer(mxc.clone(), title.clone(), window, cx)
+                    }))
+                    .child(avatar)
+                    .into_any_element()
+            }
+            _ => avatar.into_any_element(),
+        };
         let mut body = v_flex()
             .items_center()
             .gap(px(6.))
             .px(px(16.))
             .py(px(20.))
-            .child(self.avatar_image(
-                self.member_avatar(&profile_id),
-                &profile_id,
-                &name,
-                64.,
-                32.,
-                cx,
-            ))
+            .child(avatar)
             .child(
                 div()
                     .text_size(px(17.))
