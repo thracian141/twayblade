@@ -8,10 +8,14 @@ mod activity;
 mod chrome;
 #[cfg(all(test, feature = "capture"))]
 pub(crate) use chrome::account_label;
+pub(crate) mod avatar_viewer;
 pub(crate) mod conversation;
+pub(crate) mod explore;
+pub(crate) mod mentions;
 mod panels;
 pub(crate) mod selection_bar;
 mod sign_in;
+pub(crate) mod spotlight;
 mod timeline;
 
 // Secondary windows, overlays and shared pieces.
@@ -70,7 +74,7 @@ const DETAILS_WIDTH: f32 = 280.;
 const BUBBLE_MAX_WIDTH: f32 = 520.;
 const MEMBER_ROW_HEIGHT: f32 = 30.;
 /// Conversation and secondary toolbar row height.
-const TOOLBAR_HEIGHT: f32 = 52.;
+pub(crate) const TOOLBAR_HEIGHT: f32 = 52.;
 /// Clearance for the traffic lights at the left of the macOS toolbar.
 const TRAFFIC_LIGHTS_WIDTH: f32 = 78.;
 /// A new time marker appears after this much silence within a day.
@@ -391,7 +395,11 @@ impl Render for MatrixApp {
         };
         // The sidebar applied the Archive scroll while building `content`.
         self.reveal_archive = false;
-        let overlay = self.viewer.as_ref().map(|_| self.viewer_view(window, cx));
+        let overlay = if self.avatar_viewer.is_some() {
+            Some(self.avatar_viewer_view(window, cx))
+        } else {
+            self.viewer.as_ref().map(|_| self.viewer_view(window, cx))
+        };
         let workspace = !self.security_open
             && !self.snapshot.user_id.is_empty()
             && self.snapshot.session_state == twayblade_core::auth::SessionState::Active;
@@ -409,7 +417,10 @@ impl Render for MatrixApp {
                 }
             }))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.viewer.is_none() {
+                if this.viewer.is_none()
+                    && !this.spotlight_key(event, window, cx)
+                    && !this.mention_key(event, window, cx)
+                {
                     this.emoji_key(event, window, cx);
                 }
             }))
@@ -553,6 +564,7 @@ impl Render for MatrixApp {
                         view.child(self.add_account_sheet(cx))
                     })
                     .children(overlay)
+                    .children(self.spotlight_view(window, cx))
                     .when(self.notification_sample, |view| {
                         view.child(self.notification_sample_view(cx))
                     }),

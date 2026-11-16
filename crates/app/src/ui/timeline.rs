@@ -1247,8 +1247,11 @@ impl MatrixApp {
             .size(px(26.))
             .p_0()
             .rounded(px(13.))
-            .accessibility_label(format!("Open profile of {}", first.display_name))
             .tooltip(format!("Open profile of {}", first.display_name))
+            // The name beside it is the one control screen readers and Tab
+            // reach; the avatar repeats it for the pointer only.
+            .role(gpui_kit::base::RoleOverride::Presentational)
+            .tab_stop(false)
             .child(self.avatar_image(
                 first.sender_avatar.as_deref(),
                 &first.sender,
@@ -1273,7 +1276,7 @@ impl MatrixApp {
                         .text()
                         .p_0()
                         .h_auto()
-                        .accessibility_label(name.clone())
+                        .accessibility_label(format!("Open profile of {name}"))
                         .child(
                             div()
                                 .text_size(px(12.))

@@ -125,6 +125,9 @@ impl MatrixApp {
             .child(room_icon)
             .child(
                 div()
+                    .id("room-title")
+                    .role(Role::Heading)
+                    .aria_label(room.name.clone())
                     .flex_none()
                     .max_w(px(260.))
                     .truncate()
@@ -264,6 +267,7 @@ impl MatrixApp {
             .flex_1()
             .min_h_0()
             .with_jump_button_label("Jump to latest")
+            .with_label(format!("Messages in {}", room.name))
             // Kit defaults to 32px between rows; groups own their 6px spacing.
             .with_row_style(StyleRefinement::default().px_0().pb_0())
             .into_any_element()
@@ -313,6 +317,13 @@ impl MatrixApp {
                     self.snapshot.reduce_motion,
                 ))
             })
+            .children(self.mention_panel(false, cx).map(|panel| {
+                motion::rise(
+                    div().child(panel),
+                    "mention-list-motion",
+                    self.snapshot.reduce_motion,
+                )
+            }))
             .child(
                 div()
                     .h(px(18.))

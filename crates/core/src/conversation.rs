@@ -218,13 +218,19 @@ pub struct ConversationSnapshot {
 }
 
 impl Conversation {
-    pub async fn send(&self, body: String) -> Result<(), ConversationError> {
+    /// Sends `body`; picked `mentions` still in the text become links and
+    /// `m.mentions`.
+    pub async fn send(
+        &self,
+        body: String,
+        mentions: &[crate::rich_text::Mention],
+    ) -> Result<(), ConversationError> {
         self.ensure_text_channel()?;
         if body.trim().is_empty() {
             return Err(ConversationError::EmptyMessage);
         }
         self.timeline
-            .send(crate::rich_text::compose(body)?.into())
+            .send(crate::rich_text::compose_with_mentions(body, mentions)?.into())
             .await
             .map(|_| ())
             .map_err(|_| ConversationError::Queue)
@@ -246,6 +252,7 @@ impl Conversation {
         &self,
         body: String,
         in_reply_to: &str,
+        mentions: &[crate::rich_text::Mention],
     ) -> Result<(), ConversationError> {
         self.ensure_text_channel()?;
         if body.trim().is_empty() {
@@ -253,10 +260,13 @@ impl Conversation {
         }
         let event = matrix_sdk::ruma::OwnedEventId::try_from(in_reply_to)
             .map_err(|_| ConversationError::Queue)?;
-        let content =
+        let composed = crate::rich_text::compose_with_mentions(body, mentions)?;
+        let mut content =
             matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation::new(
-                crate::rich_text::compose(body)?.msgtype,
+                composed.msgtype,
             );
+        // The SDK adds the quoted sender to these.
+        content.mentions = composed.mentions;
         self.timeline
             .send_reply(content, event)
             .await

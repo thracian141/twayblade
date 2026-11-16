@@ -238,7 +238,7 @@ async fn encrypted_delivery_profile_and_same_device_store_restore() {
     );
     let body = format!("**isolated-e2ee-{}**", Uuid::new_v4());
     checked(
-        conversation.send(body.clone()).await,
+        conversation.send(body.clone(), &[]).await,
         "application send queue",
     );
     wait_for_message(&bob, room_id.to_string(), &body).await;
@@ -256,7 +256,7 @@ async fn encrypted_delivery_profile_and_same_device_store_restore() {
     drop(rich_updates);
     let plain = format!("plain isolated {}", Uuid::new_v4());
     checked(
-        conversation.send(plain.clone()).await,
+        conversation.send(plain.clone(), &[]).await,
         "plain application send",
     );
     wait_for_message(&bob, room_id.to_string(), &plain).await;
@@ -588,7 +588,7 @@ async fn keychain_session_lifecycle_phase() {
                 "lifecycle timeline",
             );
             let body = "isolated lifecycle sample";
-            checked(conversation.send(body.into()).await, "lifecycle send");
+            checked(conversation.send(body.into(), &[]).await, "lifecycle send");
             wait_for_message(&account, room.room_id().to_string(), body).await;
             let evidence = LifecycleEvidence {
                 device: account.client.device_id().expect("test device").to_string(),
@@ -881,7 +881,7 @@ async fn timeline_metadata_and_send_queue_actions() {
         "restrict test sender",
     );
     checked(
-        conversation.send("sample failed retry".into()).await,
+        conversation.send("sample failed retry".into(), &[]).await,
         "queue failing message",
     );
     let failed = wait_snapshot(
@@ -927,7 +927,7 @@ async fn timeline_metadata_and_send_queue_actions() {
         "restrict test sender again",
     );
     checked(
-        conversation.send("sample failed cancel".into()).await,
+        conversation.send("sample failed cancel".into(), &[]).await,
         "queue cancellation sample",
     );
     let failed = wait_snapshot(
@@ -1696,11 +1696,15 @@ async fn threads_send_paginate_receipts_and_closed_unread() {
     .await;
     let alice_conversation = alice_state.conversation.expect("Alice timeline");
     checked(
-        alice_conversation.send("thread seed sample".into()).await,
+        alice_conversation
+            .send("thread seed sample".into(), &[])
+            .await,
         "start new thread through SDK",
     );
     checked(
-        alice_conversation.send("thread send sample".into()).await,
+        alice_conversation
+            .send("thread send sample".into(), &[])
+            .await,
         "send through SDK thread",
     );
     let mut bob_thread = Box::pin(bob.thread_updates(id.to_string(), root_event.to_string(), 3));
@@ -1751,7 +1755,9 @@ async fn threads_send_paginate_receipts_and_closed_unread() {
     )
     .await;
     checked(
-        bob_conversation.send("thread response sample".into()).await,
+        bob_conversation
+            .send("thread response sample".into(), &[])
+            .await,
         "Bob sends in thread",
     );
     wait_snapshot(
@@ -1767,7 +1773,7 @@ async fn threads_send_paginate_receipts_and_closed_unread() {
     // A quoted reply in the main timeline points at the message it answers.
     checked(
         main_conversation
-            .send_reply("quoted reply sample".into(), root_event.as_str())
+            .send_reply("quoted reply sample".into(), root_event.as_str(), &[])
             .await,
         "send quoted reply",
     );
@@ -1824,7 +1830,7 @@ async fn threads_send_paginate_receipts_and_closed_unread() {
     for ix in 0..65 {
         checked(
             alice_conversation
-                .send(format!("pagination sample {ix}"))
+                .send(format!("pagination sample {ix}"), &[])
                 .await,
             "thread send queue",
         );
@@ -2347,12 +2353,14 @@ async fn spaces_hierarchy_invites_creation_restricted_join_and_selective_leave()
         "voice conversation contract",
     );
     assert!(matches!(
-        voice_conversation.send("Must not be sent".into()).await,
+        voice_conversation
+            .send("Must not be sent".into(), &[])
+            .await,
         Err(crate::conversation::ConversationError::VoiceOnly)
     ));
     assert!(matches!(
         voice_conversation
-            .send_reply("Must not be sent".into(), "$reply:example.org")
+            .send_reply("Must not be sent".into(), "$reply:example.org", &[])
             .await,
         Err(crate::conversation::ConversationError::VoiceOnly)
     ));
@@ -3477,7 +3485,7 @@ async fn encrypted_message_editing_sources_navigation_and_threads() {
     // Queued local echoes are never eligible, even though the SDK can edit them.
     room.send_queue().set_enabled(false);
     checked(
-        conversation.send("queued edit source".into()).await,
+        conversation.send("queued edit source".into(), &[]).await,
         "queue",
     );
     wait_snapshot(

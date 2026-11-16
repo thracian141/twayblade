@@ -204,6 +204,15 @@ fn main() {
                         view.options = Some(backend::LoginOptions { homeserver: "matrix.example.org".into(), password: true, browser: true, sso: false, providers: Vec::new() });
                     }
                     if args.iter().any(|arg| arg == "--preview-sign-out") { view.open_management(ui::spaces::ManageKind::SignOut, window, cx); }
+                    // Sample latest messages for the sidebar's preview lines.
+                    {
+                        let now = chrono::Utc::now().timestamp_millis() as u64;
+                        let samples = [("Robin", "Standup moved to 10:30"), ("Alex", "Can you check the new mockups?"), ("Sam", ""), ("You", "Pushed the release notes draft"), ("Robin", "Thanks, looks good"), ("Alex", "On my way")];
+                        for (room, (sender, text)) in view.snapshot.rooms.iter().zip(samples.iter().cycle()) {
+                            let body = if text.is_empty() { twayblade_core::activity::PreviewBody::Image } else { twayblade_core::activity::PreviewBody::Text((*text).into()) };
+                            view.snapshot.activity_previews.insert(room.id.clone(), twayblade_core::activity::RoomPreview { room: room.id.clone(), sender: format!("@{}:example.org", sender.to_lowercase()), sender_name: (*sender).into(), own: *sender == "You", body, timestamp_ms: now });
+                        }
+                    }
                     if args.iter().any(|arg| arg == "--preview-activity") {
                         view.snapshot.invites = vec![twayblade_core::space_actions::Invite { id: "sample-room".into(), name: "Planning".into(), ..Default::default() }];
                         for (room, mentions) in view.snapshot.rooms.iter_mut().zip([2u64, 0, 0, 1]) { room.mentions = mentions; room.unread = room.unread.max(mentions).max(1); }
@@ -267,6 +276,14 @@ fn main() {
                     }
                     if args.iter().any(|arg| arg == "--preview-viewer") { view.preview_viewer(window,cx); }
                     if args.iter().any(|arg| arg == "--preview-leave") { view.open_management(ui::spaces::ManageKind::LeaveRoom("general".into()),window,cx); }
+                    if args.iter().any(|arg| arg == "--preview-spotlight") { view.spotlight_open = true; }
+                    if args.iter().any(|arg| arg == "--preview-mention") {
+                        let text = "Thanks @";
+                        view.composer.update(cx, |state, cx| state.set_value(text, window, cx));
+                        view.update_mention_completion(false, text.into(), text.len());
+                    }
+                    if args.iter().any(|arg| arg == "--preview-explore") { view.open_explore(window,cx); }
+                    if args.iter().any(|arg| arg == "--preview-dm") { view.open_management(ui::spaces::ManageKind::Dm,window,cx); }
                     if args.iter().any(|arg| arg == "--preview-invite-contact") { view.open_management(ui::spaces::ManageKind::InviteContact,window,cx); }
                     if args.iter().any(|arg| arg == "--preview-archive") { for room in view.snapshot.rooms.iter_mut().filter(|room| room.id == "announcements") { room.archived = true; } view.show_archive(window, cx); }
                     if args.iter().any(|arg| arg == "--preview-message-focus") { view.focus_next_area(true, window, cx); view.focus_next_area(true, window, cx); if let Some(id) = view.message_cursor(false).map(str::to_owned) { view.step_message(false, &id, ui::focus::Step::Previous, window, cx); } }

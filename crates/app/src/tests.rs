@@ -864,6 +864,40 @@ fn emoji_cell_click_reaches_the_button_under_its_glyph(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn typing_at_lists_members_and_return_mentions_one(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestEventExt;
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.within("composer-panel").click("input-state", cx);
+        window.input("thanks @sa", cx);
+    })
+    .expect("type a mention");
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("mention-list").visible());
+        window.key_down("enter", false, cx);
+        assert_eq!(
+            window
+                .within("composer-panel")
+                .find_by_label("Message")
+                .value(),
+            Some("thanks @Sam ")
+        );
+    })
+    .expect("pick with Return");
+    cx.update(|cx| {
+        let app = app.read(cx);
+        assert!(app.mention_completion.is_none());
+        let room = app.snapshot.selected_room.clone();
+        let picked = app.mentions.get(&room).cloned().unwrap_or_default();
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].user_id, "@sam:preview.invalid");
+        assert_eq!(picked[0].label, "Sam");
+    });
+}
+
+#[gpui_kit::test]
 fn shortcode_skin_tone_and_reaction_share_the_picker(cx: &mut TestAppContext) {
     use gpui_kit::test::TestEventExt;
     let (window, app) = preview_window(cx);
@@ -1038,6 +1072,31 @@ fn title_search_offers_message_search_and_opens_the_panel(cx: &mut TestAppContex
     })
     .expect("message search panel");
     cx.update(|cx| assert!(!app.read(cx).search_open));
+}
+
+#[gpui_kit::test]
+fn search_panel_shows_recent_conversations_and_opens_a_match(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestEventExt;
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.within("title-search").click("input-state", cx);
+        window.render_frame(cx);
+        // An empty field shows recent conversations and where else to look.
+        assert!(window.find("spotlight").visible());
+        assert!(window.find("spotlight-recent").visible());
+        window.input("crit", cx);
+        window.render_frame(cx);
+        assert!(window.find("search-messages").visible());
+        window.key_down("enter", false, cx);
+    })
+    .expect("search for a conversation");
+    cx.update(|cx| {
+        let app = app.read(cx);
+        assert_eq!(app.navigation.selected_room.as_deref(), Some("critique"));
+        assert!(app.search.read(cx).value().is_empty());
+        assert!(!app.spotlight_open);
+    });
 }
 
 #[gpui_kit::test]
@@ -2773,6 +2832,144 @@ fn screen_picker_lists_sources_and_opens_from_the_share_button(cx: &mut TestAppC
         assert_eq!(app.read(cx).screen_picker, Some(SourceKind::Screen));
         assert!(app.read(cx).status.is_empty());
     });
+}
+
+#[test]
+fn known_people_come_from_direct_conversations_most_recent_first() {
+    use crate::ui::spaces::known_people;
+    let dm = |id: &str, name: &str, partner: &str, recency| crate::backend::Room {
+        id: id.into(),
+        name: name.into(),
+        direct: true,
+        partner: Some(partner.into()),
+        recency,
+        ..Default::default()
+    };
+    let rooms = vec![
+        dm("a", "Alex", "@alex:example.org", 1),
+        dm("s", "Sam", "@sam:example.org", 5),
+        // A second conversation with Sam does not list Sam twice.
+        dm("s2", "Sam", "@sam:example.org", 3),
+        crate::backend::Room {
+            id: "g".into(),
+            name: "General".into(),
+            ..Default::default()
+        },
+    ];
+    let names = |people: Vec<crate::ui::spaces::KnownPerson>| {
+        people.into_iter().map(|p| p.name).collect::<Vec<_>>()
+    };
+    assert_eq!(names(known_people(&rooms, "", &[], 6)), ["Sam", "Alex"]);
+    assert_eq!(names(known_people(&rooms, "ALEX", &[], 6)), ["Alex"]);
+    assert_eq!(names(known_people(&rooms, "sam:example", &[], 6)), ["Sam"]);
+    // Members of the room being invited to are left out.
+    assert_eq!(
+        names(known_people(&rooms, "", &["@sam:example.org".into()], 6)),
+        ["Alex"]
+    );
+    assert_eq!(names(known_people(&rooms, "", &[], 1)), ["Sam"]);
+}
+
+#[gpui_kit::test]
+fn explore_lists_public_rooms_and_switches_servers(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| app.open_explore(window, cx));
+        window.render_frame(cx);
+        assert!(window.find("explore-room-!matrix:example.org").visible());
+        // Joined rooms offer Open; knock-only rooms Ask to Join.
+        assert!(window.find("explore-join-!design:example.org").visible());
+        window.click("explore-server-matrix.org", cx);
+    })
+    .expect("explore");
+    cx.update(|cx| assert_eq!(app.read(cx).explore_server.as_deref(), Some("matrix.org")));
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("explore-join-!design:example.org", cx);
+    })
+    .expect("open a joined room");
+    cx.update(|cx| {
+        let app = app.read(cx);
+        assert!(app.management.is_none());
+        assert_eq!(
+            app.navigation.selected_room.as_deref(),
+            Some("!design:example.org")
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn direct_message_dialog_reopens_a_known_conversation(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_management(crate::ui::spaces::ManageKind::Dm, window, cx)
+        });
+        window.render_frame(cx);
+        window.click("suggest-@alex:example.org", cx);
+    })
+    .expect("pick a known person");
+    cx.update(|cx| {
+        let app = app.read(cx);
+        assert!(app.management.is_none());
+        assert_eq!(app.navigation.selected_room.as_deref(), Some("alex"));
+    });
+}
+
+#[gpui_kit::test]
+fn status_message_dialog_opens_on_the_current_status(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.snapshot.own_presence = Some(twayblade_core::presence::Presence {
+                state: twayblade_core::presence::State::Online,
+                status_msg: Some("At the conference".into()),
+                last_active_ms: None,
+            });
+            app.open_management(crate::ui::spaces::ManageKind::StatusMessage, window, cx)
+        });
+        window.render_frame(cx);
+        assert!(window.find("status-save").visible());
+        // With a status set, it can also be cleared from here.
+        assert!(window.find("status-clear").visible());
+        let page = app.read(cx).management.as_ref().unwrap();
+        assert_eq!(page.name.read(cx).value(), "At the conference");
+    })
+    .expect("status dialog");
+}
+
+#[gpui_kit::test]
+fn profile_picture_opens_full_size_and_closes(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_avatar_viewer("mxc://example.org/avatar".into(), "Alex".into(), window, cx)
+        });
+        window.render_frame(cx);
+        // Offline there is no media service, so the picture reports failure
+        // instead of loading forever.
+        assert!(window.find("avatar-viewer").visible());
+        assert!(matches!(
+            app.read(cx).avatar_viewer.as_ref().map(|v| &v.load),
+            Some(crate::ui::avatar_viewer::AvatarLoad::Failed)
+        ));
+        window.click("avatar-viewer-close", cx);
+    })
+    .expect("open and close");
+    cx.update(|cx| assert!(app.read(cx).avatar_viewer.is_none()));
+    // Only Matrix media URLs open.
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_avatar_viewer(
+                "https://example.org/a.png".into(),
+                "Alex".into(),
+                window,
+                cx,
+            )
+        });
+    })
+    .expect("refuse");
+    cx.update(|cx| assert!(app.read(cx).avatar_viewer.is_none()));
 }
 
 #[gpui_kit::test]

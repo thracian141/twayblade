@@ -2,6 +2,9 @@
 use super::*;
 use crate::ui::chrome::ToolbarControl;
 
+/// What a switch row in the room details does when toggled.
+type SwitchAction = Box<dyn Fn(&mut MatrixApp, &mut Window, &mut Context<MatrixApp>)>;
+
 impl MatrixApp {
     pub(crate) fn panel(&self, cx: &App) -> Stateful<Div> {
         v_flex()
@@ -432,51 +435,86 @@ impl MatrixApp {
     }
 
     pub(crate) fn info_about(&self, room: &Room, cx: &mut Context<Self>) -> AnyElement {
+        use crate::app::InfoTab;
         use twayblade_core::notifications::{RoomMode, RuleChange};
         let palette = theme::palette(cx);
         let muted = cx.theme().muted_foreground;
         let mode = self.snapshot.notifications.room_mode(&room.id);
         let muted_room = mode == RoomMode::Mute;
-        let tile = |id: &'static str, icon: IconName, label: &'static str, active: bool| {
-            Button::new(id)
-                .ghost()
-                .h(px(54.))
-                .flex_1()
-                .rounded(px(8.))
-                .bg(cx.theme().secondary)
-                .accessibility_label(label)
-                .child(
-                    v_flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .text_size(px(11.))
-                        .child(Icon::new(icon).size(px(15.)).text_color(if active {
-                            cx.theme().link
-                        } else {
-                            muted
-                        }))
-                        .child(label),
-                )
-        };
-        let favourite_room = room.id.clone();
         let favourite = room.favourite;
-        let mute_room = room.id.clone();
-        let link_room = room.id.clone();
-        let invite_room = room.id.clone();
-        let copy_id = room.id.clone();
+        let members = self.snapshot.members.len();
         let files = self
             .snapshot
             .messages
             .iter()
             .filter(|message| message.attachment.is_some())
             .count();
-        let info_row = |label: &'static str, value: String| {
+        // One action per row: an icon, a label, and a count or switch on the
+        // right, like the room details in Element and Mail's inspector.
+        let row = |id: &'static str, icon: IconName, label: &'static str| {
+            Button::new(id)
+                .ghost()
+                .w_full()
+                .h(px(36.))
+                .px(px(10.))
+                .justify_start()
+                .rounded(px(6.))
+                .accessibility_label(label)
+                .child(
+                    h_flex()
+                        .w_full()
+                        .gap(px(12.))
+                        .text_size(px(13.))
+                        .child(Icon::new(icon).size(px(17.)).text_color(muted))
+                        .child(div().flex_1().text_left().child(label)),
+                )
+        };
+        let count = |value: usize| {
+            div()
+                .text_size(px(12.))
+                .text_color(muted)
+                .child(value.to_string())
+        };
+        let border = cx.theme().border;
+        let separator = move || div().h(px(1.)).mx(px(10.)).my(px(6.)).bg(border);
+        let switch_row = |id: &'static str,
+                          icon: IconName,
+                          label: &'static str,
+                          checked: bool,
+                          on: SwitchAction| {
             h_flex()
-                .h(px(32.))
-                .px(px(8.))
-                .gap(px(10.))
+                .h(px(36.))
+                .px(px(10.))
+                .gap(px(12.))
+                .text_size(px(13.))
+                .child(Icon::new(icon).size(px(17.)).text_color(muted))
                 .child(div().flex_1().child(label))
-                .child(div().text_size(px(12.)).text_color(muted).child(value))
+                .child(
+                    switch::Switch::new(id)
+                        .accessibility_label(label)
+                        .checked(checked)
+                        .on_click(
+                            cx.listener(move |this, _: &bool, window, cx| on(this, window, cx)),
+                        ),
+                )
+        };
+        let favourite_room = room.id.clone();
+        let mute_room = room.id.clone();
+        let invite_room = room.id.clone();
+        let link_room = room.id.clone();
+        let leave_room = room.id.clone();
+        let copy_id = room.id.clone();
+        let badge = |icon: IconName, text: &'static str, fg: Hsla, bg: Hsla| {
+            h_flex()
+                .gap(px(5.))
+                .px(px(9.))
+                .h(px(22.))
+                .rounded_full()
+                .bg(bg)
+                .text_color(fg)
+                .text_size(px(12.))
+                .child(Icon::new(icon).size(px(12.)))
+                .child(text)
         };
         v_flex()
             .id("info-about")
@@ -485,67 +523,112 @@ impl MatrixApp {
             .overflow_y_scroll()
             .child(
                 v_flex()
+                    .items_center()
+                    .gap(px(8.))
                     .px(px(16.))
-                    .pt(px(14.))
-                    .pb(px(12.))
-                    .gap(px(4.))
+                    .pt(px(18.))
+                    .pb(px(10.))
+                    .child(self.avatar_image(
+                        room.avatar.as_deref(),
+                        &room.id,
+                        &room.name,
+                        64.,
+                        32.,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .id("info-room-name")
+                            .role(Role::Heading)
+                            .aria_label(room.name.clone())
+                            .text_size(px(16.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_center()
+                            .child(room.name.clone()),
+                    )
+                    .child(if room.encrypted {
+                        badge(
+                            IconName::Lock,
+                            "Encrypted",
+                            palette.online,
+                            palette.online.opacity(0.14),
+                        )
+                        .into_any_element()
+                    } else {
+                        h_flex()
+                            .id("encryption-warning")
+                            .w_full()
+                            .items_start()
+                            .gap(px(8.))
+                            .px(px(8.))
+                            .py(px(6.))
+                            .rounded(px(6.))
+                            .bg(palette.warning_background)
+                            .text_color(palette.warning)
+                            .text_size(px(12.))
+                            .child(Icon::new(IconName::TriangleAlert).xsmall().flex_none())
+                            .child(
+                                div()
+                                    .id("encryption-warning-text")
+                                    .flex_1()
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .child("Not encrypted. Your server can read these messages.")
+                                    .test_support(),
+                            )
+                            .test_support()
+                            .into_any_element()
+                    })
                     .child(match room.topic.clone() {
-                        Some(topic) => div().whitespace_normal().child(topic),
+                        Some(topic) => div()
+                            .w_full()
+                            .text_center()
+                            .text_color(muted)
+                            .whitespace_normal()
+                            .child(topic),
                         None => div()
+                            .w_full()
+                            .text_center()
+                            .text_size(px(12.))
                             .text_color(muted)
                             .child("No topic. Room admins can add one in room settings."),
                     }),
             )
             .child(
-                h_flex()
-                    .px(px(12.))
-                    .pb(px(14.))
-                    .gap(px(6.))
-                    .border_b_1()
-                    .border_color(cx.theme().border)
+                v_flex()
+                    .px(px(6.))
+                    .child(separator())
+                    .child(switch_row(
+                        "info-favourite",
+                        IconName::Star,
+                        "Favourite",
+                        favourite,
+                        Box::new(move |this, window, cx| {
+                            this.set_favourite(favourite_room.clone(), !favourite, window, cx)
+                        }),
+                    ))
+                    .child(switch_row(
+                        "info-mute",
+                        IconName::BellOff,
+                        "Mute notifications",
+                        muted_room,
+                        Box::new(move |this, window, cx| {
+                            this.change_notification_rule(
+                                RuleChange::Room(
+                                    mute_room.clone(),
+                                    if muted_room {
+                                        RoomMode::Default
+                                    } else {
+                                        RoomMode::Mute
+                                    },
+                                ),
+                                window,
+                                cx,
+                            )
+                        }),
+                    ))
                     .child(
-                        tile(
-                            "info-favourite",
-                            IconName::Star,
-                            if favourite { "Favourited" } else { "Favourite" },
-                            favourite,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                this.set_favourite(favourite_room.clone(), !favourite, window, cx)
-                            },
-                        )),
-                    )
-                    .child(
-                        tile(
-                            "info-mute",
-                            if muted_room {
-                                IconName::BellOff
-                            } else {
-                                IconName::Bell
-                            },
-                            if muted_room { "Unmute" } else { "Mute" },
-                            muted_room,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                this.change_notification_rule(
-                                    RuleChange::Room(
-                                        mute_room.clone(),
-                                        if muted_room {
-                                            RoomMode::Default
-                                        } else {
-                                            RoomMode::Mute
-                                        },
-                                    ),
-                                    window,
-                                    cx,
-                                )
-                            },
-                        )),
-                    )
-                    .child(
-                        tile("info-invite", IconName::Plus, "Invite", false).on_click(cx.listener(
+                        row("info-invite", IconName::UserPlus, "Invite").on_click(cx.listener(
                             move |this, _, window, cx| {
                                 this.open_management(
                                     crate::ui::spaces::ManageKind::InviteMember(
@@ -557,59 +640,81 @@ impl MatrixApp {
                             },
                         )),
                     )
+                    .child(separator())
                     .child(
-                        tile("info-copy-link", IconName::Link, "Copy link", false).on_click(
-                            move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(format!(
-                                    "https://matrix.to/#/{link_room}"
-                                )))
-                            },
-                        ),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .px(px(8.))
-                    .py(px(6.))
-                    .child(info_row(
-                        "Encryption",
-                        if room.encrypted { "On" } else { "Off" }.into(),
+                        row("info-people", IconName::Users, "People")
+                            .child(count(members))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.info_tab = InfoTab::Members;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        h_flex()
+                            .id("info-pinned")
+                            .h(px(36.))
+                            .px(px(10.))
+                            .gap(px(12.))
+                            .text_size(px(13.))
+                            .child(Icon::new(IconName::Pin).size(px(17.)).text_color(muted))
+                            .child(div().flex_1().child("Pinned messages"))
+                            .child(count(room.pinned)),
+                    )
+                    .child(
+                        row("info-files", IconName::File, "Files")
+                            .child(count(files))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.info_tab = InfoTab::Files;
+                                cx.notify();
+                            })),
+                    )
+                    .child(separator())
+                    .child(row("info-copy-link", IconName::Link, "Copy link").on_click(
+                        move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(format!(
+                                "https://matrix.to/#/{link_room}"
+                            )))
+                        },
                     ))
-                    .when(!room.encrypted, |rows| {
-                        rows.child(
-                            h_flex()
-                                .id("encryption-warning")
-                                .items_start()
-                                .gap(px(8.))
-                                .mx(px(8.))
-                                .my(px(4.))
-                                .px(px(8.))
-                                .py(px(6.))
-                                .rounded(px(6.))
-                                .bg(palette.warning_background)
-                                .text_color(palette.warning)
-                                .text_size(px(12.))
-                                .child(Icon::new(IconName::TriangleAlert).xsmall().flex_none())
-                                .child(
-                                    div()
-                                        .id("encryption-warning-text")
-                                        .flex_1()
-                                        .min_w_0()
-                                        .whitespace_normal()
-                                        .child(
-                                            "Not encrypted. Your server can read these messages.",
-                                        )
-                                        .test_support(),
-                                )
-                                .test_support(),
-                        )
-                    })
-                    .child(info_row("Pinned messages", room.pinned.to_string()))
-                    .child(info_row("Files", files.to_string()))
                     .child(
                         div()
-                            .px(px(-2.))
+                            .px(px(4.))
                             .child(self.room_notification_controls(&room.id, cx)),
+                    )
+                    .child(separator())
+                    .child(
+                        Button::new("info-leave")
+                            .ghost()
+                            .w_full()
+                            .h(px(36.))
+                            .px(px(10.))
+                            .justify_start()
+                            .rounded(px(6.))
+                            .accessibility_label(if room.direct {
+                                "Leave conversation"
+                            } else {
+                                "Leave room"
+                            })
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .gap(px(12.))
+                                    .text_size(px(13.))
+                                    .text_color(palette.error)
+                                    .child(Icon::new(IconName::LogOut).size(px(17.)))
+                                    .child(if room.direct {
+                                        "Leave conversation…"
+                                    } else {
+                                        "Leave room…"
+                                    }),
+                            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_management(
+                                    crate::ui::spaces::ManageKind::LeaveRoom(leave_room.clone()),
+                                    window,
+                                    cx,
+                                )
+                            })),
                     ),
             )
             .child(
@@ -1182,19 +1287,40 @@ impl MatrixApp {
             .as_ref()
             .map(|profile| profile.display_name.clone())
             .unwrap_or_else(|| page.name.clone());
+        let avatar = self.avatar_image(
+            self.member_avatar(&profile_id),
+            &profile_id,
+            &name,
+            64.,
+            32.,
+            cx,
+        );
+        // With a picture, the avatar opens it full size; initials stay inert.
+        let avatar = match self.member_avatar(&profile_id).map(str::to_owned) {
+            Some(mxc) if mxc.starts_with("mxc://") => {
+                let title = name.clone();
+                div()
+                    .id("profile-avatar")
+                    .role(Role::Button)
+                    .aria_label(format!("View profile picture of {name}"))
+                    .test_support()
+                    .rounded_full()
+                    .cursor_pointer()
+                    .hover(|style| style.opacity(0.85))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_avatar_viewer(mxc.clone(), title.clone(), window, cx)
+                    }))
+                    .child(avatar)
+                    .into_any_element()
+            }
+            _ => avatar.into_any_element(),
+        };
         let mut body = v_flex()
             .items_center()
             .gap(px(6.))
             .px(px(16.))
             .py(px(20.))
-            .child(self.avatar_image(
-                self.member_avatar(&profile_id),
-                &profile_id,
-                &name,
-                64.,
-                32.,
-                cx,
-            ))
+            .child(avatar)
             .child(
                 div()
                     .text_size(px(17.))

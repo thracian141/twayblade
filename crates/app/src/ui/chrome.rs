@@ -231,27 +231,33 @@ impl MatrixApp {
                         let leave = leave_id.clone();
                         let view = weak.clone();
                         let leave_view = weak.clone();
-                        menu.item(PopupMenuItem::new("Browse rooms").on_click(
-                            move |_, window, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    this.open_management(
-                                        crate::ui::spaces::ManageKind::Directory(browse.clone()),
-                                        window,
-                                        cx,
-                                    )
-                                });
-                            },
-                        ))
+                        menu.item(
+                            PopupMenuItem::new("Browse rooms")
+                                .icon(IconName::Compass)
+                                .on_click(move |_, window, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.open_management(
+                                            crate::ui::spaces::ManageKind::Directory(
+                                                browse.clone(),
+                                            ),
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                }),
+                        )
                         .item(
-                            PopupMenuItem::new("Leave space…").on_click(move |_, window, cx| {
-                                let _ = leave_view.update(cx, |this, cx| {
-                                    this.open_management(
-                                        crate::ui::spaces::ManageKind::Leave(leave.clone()),
-                                        window,
-                                        cx,
-                                    )
-                                });
-                            }),
+                            PopupMenuItem::new("Leave space…")
+                                .icon(IconName::LogOut)
+                                .on_click(move |_, window, cx| {
+                                    let _ = leave_view.update(cx, |this, cx| {
+                                        this.open_management(
+                                            crate::ui::spaces::ManageKind::Leave(leave.clone()),
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                }),
                         )
                     }),
             );
@@ -281,6 +287,9 @@ impl MatrixApp {
         let id = room.id.clone();
         let unread = room.unread > 0 && !selected && !room.muted;
         let muted = cx.theme().muted_foreground;
+        let two_lines = self.preferences.appearance.room_previews;
+        // Two-line rows get a larger picture, as in Mail and Messages.
+        let size = if two_lines { 30. } else { 16. };
         // DMs and rooms with their own picture show it; others show # or a lock.
         let icon = if room.channel_kind == twayblade_core::channels::ChannelKind::Voice {
             Icon::new(IconName::Mic)
@@ -293,29 +302,34 @@ impl MatrixApp {
                     room.avatar.as_deref(),
                     &room.id,
                     &room.name,
-                    16.,
-                    if room.direct { 8. } else { 4. },
+                    size,
+                    size / 2.,
                     cx,
                 )
-                .text_size(px(8.))
+                .text_size(px(size / 2.))
                 .into_any_element();
             if room.direct {
-                self.with_presence(avatar, room.presence.as_ref(), 16., cx)
+                self.with_presence(avatar, room.presence.as_ref(), size, cx)
             } else {
                 avatar
             }
         } else {
             div()
-                .w(px(16.))
+                .w(px(size))
+                .h(px(size))
                 .flex()
+                .items_center()
                 .justify_center()
+                .when(two_lines, |tile| {
+                    tile.rounded_full().bg(cx.theme().secondary)
+                })
                 .child(
                     Icon::new(if room.public {
                         IconName::Hash
                     } else {
                         IconName::Lock
                     })
-                    .size(px(13.))
+                    .size(px(if two_lines { 15. } else { 13. }))
                     .text_color(muted),
                 )
                 .into_any_element()
@@ -331,40 +345,74 @@ impl MatrixApp {
                     badge(room.unread, cx)
                 }
             });
+        // With previews on, a second line shows the latest message.
+        let preview = self
+            .preferences
+            .appearance
+            .room_previews
+            .then(|| self.snapshot.activity_previews.get(&room.id))
+            .flatten()
+            .map(|preview| crate::ui::activity::preview_line(preview, room.direct));
         let row = Button::new(SharedString::from(format!("room-{}", room.id)))
             // A known handle, so F6 and the Archive menu item can focus the row.
             .track_focus(&self.room_focus(&room.id, cx))
             .ghost()
             .w_full()
-            .h(px(density.row()))
+            .h(px(if two_lines {
+                density.preview_row()
+            } else {
+                density.row()
+            }))
             .p_0()
             .rounded(px(6.))
             // macOS reports selection only for list-like roles, so the label
             // says it too; the inner row paints it.
             .selected(selected)
             .bg(gpui_kit::transparent_black())
-            .accessibility_label(room_label(room, selected))
+            .accessibility_label(match &preview {
+                Some(line) => format!("{}, {line}", room_label(room, selected)),
+                None => room_label(room, selected),
+            })
             .child(
                 h_flex()
                     .size_full()
                     .px(px(8.))
-                    .gap(px(8.))
+                    .gap(px(if two_lines { 10. } else { 8. }))
                     .rounded(px(6.))
                     .when(selected, |row| row.bg(palette.selection))
                     .when(room.muted && !selected, |row| row.opacity(0.55))
                     .text_color(cx.theme().foreground)
                     .child(icon)
                     .child(
-                        div()
+                        v_flex()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_left()
-                            .text_size(px(13.))
-                            .when(unread || selected, |name| {
-                                name.font_weight(FontWeight::SEMIBOLD)
-                            })
-                            .child(room.name.clone()),
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_left()
+                                    .text_size(px(13.))
+                                    .when(unread || selected, |name| {
+                                        name.font_weight(FontWeight::SEMIBOLD)
+                                    })
+                                    .child(room.name.clone()),
+                            )
+                            .when(two_lines, |column| {
+                                // Keep the line's height when the preview is
+                                // still loading, so rows don't jump.
+                                column.child(
+                                    div()
+                                        .truncate()
+                                        .text_left()
+                                        .text_size(px(12.))
+                                        .text_color(if unread {
+                                            cx.theme().foreground
+                                        } else {
+                                            muted
+                                        })
+                                        .child(preview.clone().unwrap_or_else(|| "\u{a0}".into())),
+                                )
+                            }),
                     )
                     .children(badge),
             )
@@ -397,6 +445,11 @@ impl MatrixApp {
                         } else {
                             "Add to Favourites"
                         })
+                        .icon(if favourite {
+                            IconName::StarOff
+                        } else {
+                            IconName::Star
+                        })
                         .on_click(move |_, window, cx| {
                             let _ = favourite_view.update(cx, |this, cx| {
                                 this.set_favourite(favourite_room.clone(), !favourite, window, cx)
@@ -407,13 +460,15 @@ impl MatrixApp {
                 if !has_unread {
                     let unread_view = weak.clone();
                     let unread_room = room_id.clone();
-                    menu = menu.item(PopupMenuItem::new("Mark as unread").on_click(
-                        move |_, window, cx| {
-                            let _ = unread_view.update(cx, |this, cx| {
-                                this.set_unread(unread_room.clone(), window, cx)
-                            });
-                        },
-                    ));
+                    menu = menu.item(
+                        PopupMenuItem::new("Mark as unread")
+                            .icon(IconName::Mail)
+                            .on_click(move |_, window, cx| {
+                                let _ = unread_view.update(cx, |this, cx| {
+                                    this.set_unread(unread_room.clone(), window, cx)
+                                });
+                            }),
+                    );
                 }
                 let archive_view = weak.clone();
                 let archive_room = room_id.clone();
@@ -422,6 +477,11 @@ impl MatrixApp {
                         "Move out of Archive"
                     } else {
                         "Archive"
+                    })
+                    .icon(if archived {
+                        IconName::ArchiveRestore
+                    } else {
+                        IconName::Archive
                     })
                     .on_click(move |_, window, cx| {
                         let _ = archive_view.update(cx, |this, cx| {
@@ -432,15 +492,21 @@ impl MatrixApp {
                 let leave_view = weak.clone();
                 let leave_room = room_id.clone();
                 menu = menu
-                    .item(PopupMenuItem::new("Leave…").on_click(move |_, window, cx| {
-                        let _ = leave_view.update(cx, |this, cx| {
-                            this.open_management(
-                                crate::ui::spaces::ManageKind::LeaveRoom(leave_room.clone()),
-                                window,
-                                cx,
-                            )
-                        });
-                    }))
+                    .item(
+                        PopupMenuItem::new("Leave…")
+                            .icon(IconName::LogOut)
+                            .on_click(move |_, window, cx| {
+                                let _ = leave_view.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::LeaveRoom(
+                                            leave_room.clone(),
+                                        ),
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                    )
                     .separator();
                 if !available {
                     return menu;
@@ -642,20 +708,25 @@ impl MatrixApp {
                 let add = weak.clone();
                 menu = menu
                     .item(
-                        PopupMenuItem::new("Add Account…").on_click(move |_, window, cx| {
-                            let _ = add.update(cx, |this, cx| this.begin_add_account(window, cx));
-                        }),
+                        PopupMenuItem::new("Add Account…")
+                            .icon(IconName::UserRoundPlus)
+                            .on_click(move |_, window, cx| {
+                                let _ =
+                                    add.update(cx, |this, cx| this.begin_add_account(window, cx));
+                            }),
                     )
                     .separator();
                 let profile = weak.clone();
                 let id = user.clone();
-                menu = menu.item(PopupMenuItem::new("Your Profile").on_click(
-                    move |_, window, cx| {
-                        let _ = profile.update(cx, |this, cx| {
-                            this.open_profile(id.clone(), "You".into(), window, cx)
-                        });
-                    },
-                ));
+                menu = menu.item(
+                    PopupMenuItem::new("Your Profile")
+                        .icon(IconName::CircleUser)
+                        .on_click(move |_, window, cx| {
+                            let _ = profile.update(cx, |this, cx| {
+                                this.open_profile(id.clone(), "You".into(), window, cx)
+                            });
+                        }),
+                );
                 if enabled {
                     menu = menu.separator();
                     for (label, state) in [
@@ -675,20 +746,42 @@ impl MatrixApp {
                                 }),
                         );
                     }
+                    {
+                        let weak = weak.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(if status_msg.is_some() {
+                                "Change Status Message…"
+                            } else {
+                                "Set Status Message…"
+                            })
+                            .icon(IconName::MessageSquareText)
+                            .on_click(move |_, window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::StatusMessage,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                        );
+                    }
                     if status_msg.is_some() {
                         let weak = weak.clone();
-                        menu = menu.item(PopupMenuItem::new("Clear Status Message").on_click(
-                            move |_, window, cx| {
-                                let _ = weak.update(cx, |this, cx| {
-                                    let state = this
-                                        .snapshot
-                                        .own_presence
-                                        .as_ref()
-                                        .map_or(State::Online, |presence| presence.state);
-                                    this.set_presence(state, None, window, cx)
-                                });
-                            },
-                        ));
+                        menu = menu.item(
+                            PopupMenuItem::new("Clear Status Message")
+                                .icon(IconName::MessageSquareX)
+                                .on_click(move |_, window, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        let state = this
+                                            .snapshot
+                                            .own_presence
+                                            .as_ref()
+                                            .map_or(State::Online, |presence| presence.state);
+                                        this.set_presence(state, None, window, cx)
+                                    });
+                                }),
+                        );
                     }
                 }
                 let create = weak.clone();
@@ -699,36 +792,58 @@ impl MatrixApp {
                 let sign_out = weak.clone();
                 menu.separator()
                     .item(
-                        PopupMenuItem::new("Create Room…").on_click(move |_, window, cx| {
-                            let _ = create.update(cx, |this, cx| {
-                                this.open_management(
-                                    crate::ui::spaces::ManageKind::Create,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        }),
+                        PopupMenuItem::new("Explore Public Rooms…")
+                            .icon(IconName::Compass)
+                            .on_click({
+                                let explore = weak.clone();
+                                move |_, window, cx| {
+                                    let _ = explore
+                                        .update(cx, |this, cx| this.open_explore(window, cx));
+                                }
+                            }),
                     )
-                    .item(PopupMenuItem::new("Start a Direct Message…").on_click(
-                        move |_, window, cx| {
-                            let _ = dm.update(cx, |this, cx| {
-                                this.open_management(crate::ui::spaces::ManageKind::Dm, window, cx)
-                            });
-                        },
-                    ))
                     .item(
-                        PopupMenuItem::new("Invite a Contact…").on_click(move |_, window, cx| {
-                            let _ = invite.update(cx, |this, cx| {
-                                this.open_management(
-                                    crate::ui::spaces::ManageKind::InviteContact,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        }),
+                        PopupMenuItem::new("Create Room…")
+                            .icon(IconName::MessageSquarePlus)
+                            .on_click(move |_, window, cx| {
+                                let _ = create.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::Create,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Start a Direct Message…")
+                            .icon(IconName::MessageCirclePlus)
+                            .on_click(move |_, window, cx| {
+                                let _ = dm.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::Dm,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Invite a Contact…")
+                            .icon(IconName::Send)
+                            .on_click(move |_, window, cx| {
+                                let _ = invite.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::InviteContact,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
                     )
                     .item(
                         PopupMenuItem::new("Archive")
+                            .icon(IconName::Archive)
                             .disabled(!has_archive)
                             .on_click(move |_, window, cx| {
                                 let _ =
@@ -737,23 +852,27 @@ impl MatrixApp {
                     )
                     .separator()
                     .item(
-                        PopupMenuItem::new("Account Settings…").on_click(move |_, _, cx| {
-                            let _ = settings.update(cx, |this, cx| {
-                                this.open_settings(crate::ui::settings::Section::Account, cx)
-                            });
-                        }),
+                        PopupMenuItem::new("Account Settings…")
+                            .icon(IconName::Settings)
+                            .on_click(move |_, _, cx| {
+                                let _ = settings.update(cx, |this, cx| {
+                                    this.open_settings(crate::ui::settings::Section::Account, cx)
+                                });
+                            }),
                     )
-                    .item(PopupMenuItem::new(sign_out_label.clone()).on_click(
-                        move |_, window, cx| {
-                            let _ = sign_out.update(cx, |this, cx| {
-                                this.open_management(
-                                    crate::ui::spaces::ManageKind::SignOut,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        },
-                    ))
+                    .item(
+                        PopupMenuItem::new(sign_out_label.clone())
+                            .icon(IconName::LogOut)
+                            .on_click(move |_, window, cx| {
+                                let _ = sign_out.update(cx, |this, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::SignOut,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }),
+                    )
             })
             .into_any_element()
     }
@@ -803,46 +922,6 @@ impl MatrixApp {
             .into_any_element()
     }
 
-    pub(crate) fn search_messages_row(&self, query: &str, cx: &mut Context<Self>) -> AnyElement {
-        Button::new("search-messages")
-            .ghost()
-            .w_full()
-            .h(px(30.))
-            .px(px(8.))
-            .justify_start()
-            .accessibility_label(format!("Search messages for {query}"))
-            .child(
-                h_flex()
-                    .w_full()
-                    .gap(px(8.))
-                    .child(
-                        Icon::new(IconName::Search)
-                            .size(px(14.))
-                            .text_color(cx.theme().muted_foreground),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_left()
-                            .child(format!("Search messages for “{query}”")),
-                    )
-                    .child(
-                        div()
-                            .px(px(4.))
-                            .rounded(px(4.))
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .text_size(px(10.5))
-                            .text_color(cx.theme().muted_foreground)
-                            .child("↩"),
-                    ),
-            )
-            .on_click(cx.listener(|this, _, window, cx| this.run_message_search(window, cx)))
-            .into_any_element()
-    }
-
     pub(crate) fn sidebar_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let query = self.search.read(cx).value().to_lowercase();
@@ -885,11 +964,6 @@ impl MatrixApp {
             .track_scroll(&self.sidebar_scroll);
         // Direct children so far; the Archive is scrolled to by its index.
         let mut children = 0;
-        let typed = self.search.read(cx).value().trim().to_owned();
-        if !typed.is_empty() {
-            list = list.child(div().pt(px(6.)).child(self.search_messages_row(&typed, cx)));
-            children += 1;
-        }
         if !self.snapshot.invites.is_empty() {
             list = list.child(self.invite_section(cx));
             children += 1;

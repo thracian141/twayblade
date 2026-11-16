@@ -230,6 +230,7 @@ pub(super) fn preview(home: bool, count: usize) -> Snapshot {
                 unread: 2,
                 encrypted: true,
                 direct: true,
+                partner: Some("@alex:example.org".into()),
                 ..Default::default()
             },
         ],
