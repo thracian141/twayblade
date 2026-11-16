@@ -204,6 +204,15 @@ fn main() {
                         view.options = Some(backend::LoginOptions { homeserver: "matrix.example.org".into(), password: true, browser: true, sso: false, providers: Vec::new() });
                     }
                     if args.iter().any(|arg| arg == "--preview-sign-out") { view.open_management(ui::spaces::ManageKind::SignOut, window, cx); }
+                    // Sample latest messages for the sidebar's preview lines.
+                    {
+                        let now = chrono::Utc::now().timestamp_millis() as u64;
+                        let samples = [("Robin", "Standup moved to 10:30"), ("Alex", "Can you check the new mockups?"), ("Sam", ""), ("You", "Pushed the release notes draft"), ("Robin", "Thanks, looks good"), ("Alex", "On my way")];
+                        for (room, (sender, text)) in view.snapshot.rooms.iter().zip(samples.iter().cycle()) {
+                            let body = if text.is_empty() { twayblade_core::activity::PreviewBody::Image } else { twayblade_core::activity::PreviewBody::Text((*text).into()) };
+                            view.snapshot.activity_previews.insert(room.id.clone(), twayblade_core::activity::RoomPreview { room: room.id.clone(), sender: format!("@{}:example.org", sender.to_lowercase()), sender_name: (*sender).into(), own: *sender == "You", body, timestamp_ms: now });
+                        }
+                    }
                     if args.iter().any(|arg| arg == "--preview-activity") {
                         view.snapshot.invites = vec![twayblade_core::space_actions::Invite { id: "sample-room".into(), name: "Planning".into(), ..Default::default() }];
                         for (room, mentions) in view.snapshot.rooms.iter_mut().zip([2u64, 0, 0, 1]) { room.mentions = mentions; room.unread = room.unread.max(mentions).max(1); }

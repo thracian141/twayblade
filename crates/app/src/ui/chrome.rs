@@ -279,6 +279,9 @@ impl MatrixApp {
         let id = room.id.clone();
         let unread = room.unread > 0 && !selected && !room.muted;
         let muted = cx.theme().muted_foreground;
+        let two_lines = self.preferences.appearance.room_previews;
+        // Two-line rows get a larger picture, as in Mail and Messages.
+        let size = if two_lines { 30. } else { 16. };
         // DMs and rooms with their own picture show it; others show # or a lock.
         let icon = if room.direct || room.avatar.is_some() {
             let avatar = self
@@ -286,29 +289,34 @@ impl MatrixApp {
                     room.avatar.as_deref(),
                     &room.id,
                     &room.name,
-                    16.,
-                    if room.direct { 8. } else { 4. },
+                    size,
+                    size / 2.,
                     cx,
                 )
-                .text_size(px(8.))
+                .text_size(px(size / 2.))
                 .into_any_element();
             if room.direct {
-                self.with_presence(avatar, room.presence.as_ref(), 16., cx)
+                self.with_presence(avatar, room.presence.as_ref(), size, cx)
             } else {
                 avatar
             }
         } else {
             div()
-                .w(px(16.))
+                .w(px(size))
+                .h(px(size))
                 .flex()
+                .items_center()
                 .justify_center()
+                .when(two_lines, |tile| {
+                    tile.rounded_full().bg(cx.theme().secondary)
+                })
                 .child(
                     Icon::new(if room.public {
                         IconName::Hash
                     } else {
                         IconName::Lock
                     })
-                    .size(px(13.))
+                    .size(px(if two_lines { 15. } else { 13. }))
                     .text_color(muted),
                 )
                 .into_any_element()
@@ -324,40 +332,74 @@ impl MatrixApp {
                     badge(room.unread, cx)
                 }
             });
+        // With previews on, a second line shows the latest message.
+        let preview = self
+            .preferences
+            .appearance
+            .room_previews
+            .then(|| self.snapshot.activity_previews.get(&room.id))
+            .flatten()
+            .map(|preview| crate::ui::activity::preview_line(preview, room.direct));
         let row = Button::new(SharedString::from(format!("room-{}", room.id)))
             // A known handle, so F6 and the Archive menu item can focus the row.
             .track_focus(&self.room_focus(&room.id, cx))
             .ghost()
             .w_full()
-            .h(px(density.row()))
+            .h(px(if two_lines {
+                density.preview_row()
+            } else {
+                density.row()
+            }))
             .p_0()
             .rounded(px(6.))
             // macOS reports selection only for list-like roles, so the label
             // says it too; the inner row paints it.
             .selected(selected)
             .bg(gpui_kit::transparent_black())
-            .accessibility_label(room_label(room, selected))
+            .accessibility_label(match &preview {
+                Some(line) => format!("{}, {line}", room_label(room, selected)),
+                None => room_label(room, selected),
+            })
             .child(
                 h_flex()
                     .size_full()
                     .px(px(8.))
-                    .gap(px(8.))
+                    .gap(px(if two_lines { 10. } else { 8. }))
                     .rounded(px(6.))
                     .when(selected, |row| row.bg(palette.selection))
                     .when(room.muted && !selected, |row| row.opacity(0.55))
                     .text_color(cx.theme().foreground)
                     .child(icon)
                     .child(
-                        div()
+                        v_flex()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_left()
-                            .text_size(px(13.))
-                            .when(unread || selected, |name| {
-                                name.font_weight(FontWeight::SEMIBOLD)
-                            })
-                            .child(room.name.clone()),
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_left()
+                                    .text_size(px(13.))
+                                    .when(unread || selected, |name| {
+                                        name.font_weight(FontWeight::SEMIBOLD)
+                                    })
+                                    .child(room.name.clone()),
+                            )
+                            .when(two_lines, |column| {
+                                // Keep the line's height when the preview is
+                                // still loading, so rows don't jump.
+                                column.child(
+                                    div()
+                                        .truncate()
+                                        .text_left()
+                                        .text_size(px(12.))
+                                        .text_color(if unread {
+                                            cx.theme().foreground
+                                        } else {
+                                            muted
+                                        })
+                                        .child(preview.clone().unwrap_or_else(|| "\u{a0}".into())),
+                                )
+                            }),
                     )
                     .children(badge),
             )
