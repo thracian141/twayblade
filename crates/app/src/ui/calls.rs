@@ -456,16 +456,22 @@ impl MatrixApp {
             return None;
         }
         let busy = current.is_some();
+        let voice_channel = self.is_voice_channel(room_id);
         let joined = self
             .snapshot
             .room_calls
             .get(room_id)
             .map_or(0, |call| call.participants.len());
-        if joined > 0 && !busy {
+        if (joined > 0 || voice_channel) && !busy {
             let room = room_id.to_owned();
-            let label = format!("Join call · {joined}");
+            let label = if voice_channel {
+                format!("Join voice · {joined}")
+            } else {
+                format!("Join call · {joined}")
+            };
             return Some(
                 Button::new("call-join")
+                    .disabled(!encrypted || self.preview)
                     .primary()
                     .h(px(24.))
                     .px(px(8.))
@@ -1189,6 +1195,7 @@ impl MatrixApp {
     }
 
     fn call_stage(&self, call: &CallState, cx: &mut Context<Self>) -> AnyElement {
+        let voice_channel = self.is_voice_channel(&call.room_id);
         let palette = theme::palette(cx);
         let muted_fg = cx.theme().muted_foreground;
         let (title, mut detail) = self.call_status(call);
@@ -1638,72 +1645,76 @@ impl MatrixApp {
                             this.call_result(result, cx)
                         })),
                 )
-                .child(
-                    Button::new("call-camera")
-                        .outline()
-                        .size(px(32.))
-                        .rounded(px(16.))
-                        .icon(
-                            Icon::new(if camera {
-                                IconName::Video
+                .when(!voice_channel, |view| {
+                    view.child(
+                        Button::new("call-camera")
+                            .outline()
+                            .size(px(32.))
+                            .rounded(px(16.))
+                            .icon(
+                                Icon::new(if camera {
+                                    IconName::Video
+                                } else {
+                                    IconName::VideoOff
+                                })
+                                .size(px(15.)),
+                            )
+                            .selected(!camera)
+                            .disabled(connecting)
+                            .accessibility_label(if camera {
+                                "Turn camera off"
                             } else {
-                                IconName::VideoOff
+                                "Turn camera on"
                             })
-                            .size(px(15.)),
-                        )
-                        .selected(!camera)
-                        .disabled(connecting)
-                        .accessibility_label(if camera {
-                            "Turn camera off"
-                        } else {
-                            "Turn camera on"
-                        })
-                        .tooltip(hint(
-                            if camera {
-                                "Turn Camera Off"
-                            } else {
-                                "Turn Camera On"
-                            },
-                            Action::ToggleCamera,
-                        ))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let result = this.set_video(!camera);
-                            this.call_result(result, cx)
-                        })),
-                )
-                .child(
-                    Button::new("call-screen-share")
-                        .outline()
-                        .size(px(32.))
-                        .rounded(px(16.))
-                        .icon(
-                            Icon::new(if screen == ScreenShare::Off {
-                                IconName::ScreenShare
-                            } else {
-                                IconName::ScreenShareOff
+                            .tooltip(hint(
+                                if camera {
+                                    "Turn Camera Off"
+                                } else {
+                                    "Turn Camera On"
+                                },
+                                Action::ToggleCamera,
+                            ))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let result = this.set_video(!camera);
+                                this.call_result(result, cx)
+                            })),
+                    )
+                })
+                .when(!voice_channel, |view| {
+                    view.child(
+                        Button::new("call-screen-share")
+                            .outline()
+                            .size(px(32.))
+                            .rounded(px(16.))
+                            .icon(
+                                Icon::new(if screen == ScreenShare::Off {
+                                    IconName::ScreenShare
+                                } else {
+                                    IconName::ScreenShareOff
+                                })
+                                .size(px(15.)),
+                            )
+                            .selected(screen != ScreenShare::Off || self.screen_picker.is_some())
+                            .disabled(connecting)
+                            .accessibility_label(match screen {
+                                ScreenShare::Off => "Share screen",
+                                ScreenShare::Choosing => "Cancel screen sharing",
+                                ScreenShare::Live => "Stop sharing screen",
                             })
-                            .size(px(15.)),
-                        )
-                        .selected(screen != ScreenShare::Off || self.screen_picker.is_some())
-                        .disabled(connecting)
-                        .accessibility_label(match screen {
-                            ScreenShare::Off => "Share screen",
-                            ScreenShare::Choosing => "Cancel screen sharing",
-                            ScreenShare::Live => "Stop sharing screen",
-                        })
-                        .tooltip(hint(
-                            match screen {
-                                ScreenShare::Off => "Share Screen",
-                                ScreenShare::Choosing => "Cancel Sharing",
-                                ScreenShare::Live => "Stop Sharing",
-                            },
-                            Action::ToggleScreenShare,
-                        ))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let result = this.toggle_screen(screen == ScreenShare::Off, cx);
-                            this.call_result(result, cx)
-                        })),
-                )
+                            .tooltip(hint(
+                                match screen {
+                                    ScreenShare::Off => "Share Screen",
+                                    ScreenShare::Choosing => "Cancel Sharing",
+                                    ScreenShare::Live => "Stop Sharing",
+                                },
+                                Action::ToggleScreenShare,
+                            ))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let result = this.toggle_screen(screen == ScreenShare::Off, cx);
+                                this.call_result(result, cx)
+                            })),
+                    )
+                })
                 .when(
                     call.participants
                         .iter()

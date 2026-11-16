@@ -20,6 +20,26 @@ impl Navigation {
     }
 
     pub fn room_visible_in(space: Option<&str>, id: &str, snapshot: &Snapshot) -> bool {
+        if space.is_none()
+            && snapshot.rooms.iter().any(|room| {
+                room.id == id
+                    && !room.archived
+                    && room.channel_kind == twayblade_core::channels::ChannelKind::Voice
+            })
+            && snapshot
+                .spaces
+                .iter()
+                .any(|space| space.room_ids.contains(id))
+        {
+            return false;
+        }
+        if snapshot
+            .rooms
+            .iter()
+            .any(|room| room.id == id && room.direct)
+        {
+            return space.is_none();
+        }
         if let Some(selected) = space {
             return snapshot
                 .spaces
@@ -38,6 +58,28 @@ impl Navigation {
                     .spaces
                     .iter()
                     .any(|space| space.room_ids.contains(id)))
+    }
+
+    pub fn route_room(&mut self, id: &str, snapshot: &Snapshot) {
+        if !snapshot.rooms.iter().any(|room| room.id == id) {
+            return;
+        }
+        if self.room_visible(id, snapshot) {
+            return;
+        }
+        self.selected_space = if snapshot
+            .rooms
+            .iter()
+            .any(|room| room.id == id && room.direct)
+        {
+            None
+        } else {
+            snapshot
+                .spaces
+                .iter()
+                .find(|space| space.room_ids.contains(id))
+                .map(|space| space.id.clone())
+        };
     }
 
     pub fn reconcile(&mut self, snapshot: &Snapshot) -> bool {
@@ -488,6 +530,74 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn direct_messages_live_in_home_even_when_linked_to_a_space() {
+        let mut snapshot = preview(false, 6);
+        snapshot.rooms.push(Room {
+            id: "dm".into(),
+            direct: true,
+            ..Default::default()
+        });
+        snapshot.spaces[0].room_ids.insert("dm".into());
+        let mut navigation = Navigation {
+            selected_space: Some("design".into()),
+            ..Default::default()
+        };
+        assert!(!navigation.room_visible("dm", &snapshot));
+        navigation.route_room("dm", &snapshot);
+        assert!(navigation.selected_space.is_none());
+        assert!(navigation.room_visible("dm", &snapshot));
+        snapshot.spaces_loaded = false;
+        assert!(navigation.room_visible("dm", &snapshot));
+    }
+
+    #[test]
+    fn external_rooms_route_home_and_voice_channels_stay_inside_spaces() {
+        let mut snapshot = preview(false, 6);
+        snapshot.rooms.push(Room {
+            id: "external".into(),
+            ..Default::default()
+        });
+        snapshot.rooms.push(Room {
+            id: "voice".into(),
+            channel_kind: twayblade_core::channels::ChannelKind::Voice,
+            ..Default::default()
+        });
+        snapshot.spaces[0].room_ids.insert("voice".into());
+        let mut navigation = Navigation {
+            selected_space: Some("design".into()),
+            ..Default::default()
+        };
+        navigation.route_room("external", &snapshot);
+        assert!(navigation.selected_space.is_none());
+        assert!(navigation.room_visible("external", &snapshot));
+        assert!(!navigation.room_visible("voice", &snapshot));
+        navigation.route_room("voice", &snapshot);
+        assert_eq!(navigation.selected_space.as_deref(), Some("design"));
+        assert!(navigation.room_visible("voice", &snapshot));
+        navigation.route_room("not-yet-synced", &snapshot);
+        assert_eq!(navigation.selected_space.as_deref(), Some("design"));
+    }
+
+    #[test]
+    fn joined_voice_without_a_joined_parent_remains_reachable_in_home() {
+        let mut snapshot = preview(false, 6);
+        snapshot.rooms.push(Room {
+            id: "voice".into(),
+            channel_kind: twayblade_core::channels::ChannelKind::Voice,
+            ..Default::default()
+        });
+        snapshot.spaces[0].room_ids.insert("voice".into());
+        let mut navigation = Navigation::default();
+        assert!(!navigation.room_visible("voice", &snapshot));
+        snapshot.spaces.clear();
+        navigation.route_room("voice", &snapshot);
+        assert!(navigation.selected_space.is_none());
+        assert!(navigation.room_visible("voice", &snapshot));
+        navigation.selected_room = Some("voice".into());
+        assert!(!navigation.reconcile(&snapshot));
+    }
 
     #[test]
     fn home_waits_for_membership_and_preserves_hidden_drafts() {

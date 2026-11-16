@@ -12,7 +12,7 @@ apple_env+=("DEVELOPER_DIR=$apple_developer_dir")
 run=false
 preview=false
 profile=debug
-build=(cargo build --locked -p twayblade)
+build=(python3 scripts/cargo-pruned build --locked -p twayblade)
 app_args=()
 for arg in "$@"; do
     case "$arg" in

@@ -88,6 +88,8 @@ impl Conversation {
     }
 
     pub async fn edit(&self, event_id: &str, new_body: String) -> Result<(), EditError> {
+        self.ensure_text_channel()
+            .map_err(|_| EditError::NotEditable)?;
         let items = self.timeline.items().await;
         let event = items
             .iter()

@@ -286,8 +286,11 @@ claiming it passed. Use `--offline` only after dependencies are cached.
 `target/` grows with every dependency update and feature combination. To keep
 it bounded, run cargo through `scripts/cargo-pruned` (needs Python 3), for
 example `scripts/cargo-pruned build --locked -p twayblade`. For each distinct
-command it keeps the latest build and the one before, and deletes everything
-else under `target/<profile>/`. Add `--dry-run` to list what would go.
+command it keeps the latest build and removes superseded hashed artifacts under
+`target/<profile>/{deps,build,.fingerprint,incremental}`. Shared dependencies
+remain cached. Add `--dry-run` to list what would go. The macOS helper uses this
+cleanup after each successful build and requires Python 3; failed builds do not
+trigger cleanup.
 
 ## Isolated Matrix integration tests
 
@@ -414,3 +417,17 @@ Before publication, inspect staged changes and run a secret scanner.
 - **Missing history:** native sliding sync is required; no legacy fallback exists.
 - **Unable to decrypt:** verification/recovery UI is pending. Preserve device
   keys and state; re-login or store deletion is not a recovery procedure.
+
+## Space channels (development)
+
+Select a space where you can add rooms, choose **+**, and enter a name. The
+current space is used automatically. Turn on **Voice channel** to create a voice
+channel; otherwise it creates a text channel. Enabled switches use the accent
+color. Voice-channel encryption is mandatory, so it has no separate toggle. Voice channels offer **Join voice**
+and reuse the current native call controls, without text chat or ringing.
+Home holds DMs and received conversations outside your spaces. A DM started from
+a member's profile opens in Home.
+
+This is initial channel wiring. Voice channels require the same MatrixRTC/LiveKit
+server support and media encryption as native calls. Actual two-device voice
+channel operation and Element interoperability have not been accepted yet.

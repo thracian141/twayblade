@@ -60,6 +60,8 @@ impl MatrixApp {
                     .size(px(size))
                     .rounded(px(radius))
                     .overflow_hidden()
+                    // GPUI clips overflow to a rectangle; the image needs its
+                    // own radius to match the rounded initials fallback.
                     .child(img(image.clone()).size_full().rounded(px(radius)));
             }
             Some(AvatarState::Loading | AvatarState::Failed) => return fallback(),

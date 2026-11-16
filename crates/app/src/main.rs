@@ -136,7 +136,7 @@ fn main() {
                     title: Some("Twayblade".into()),
                     appears_transparent: cfg!(target_os = "macos"),
                     traffic_light_position: cfg!(target_os = "macos")
-                        .then(|| point(px(16.), px(14.))),
+                        .then(|| point(px(16.), px(9.))),
                 }),
                 app_owns_titlebar_drag: cfg!(target_os = "macos"),
                 ..Default::default()

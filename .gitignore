@@ -1,4 +1,5 @@
-/target/
+# A directory, or the symlink worktrees use to share the main build.
+/target
 /.direnv/
 /.cargo-home/
 .DS_Store

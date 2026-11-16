@@ -68,11 +68,13 @@ pub(crate) struct Management {
     pub name: Entity<InputState>,
     pub topic: Entity<InputState>,
     pub encrypted: bool,
+    pub voice_channel: bool,
     pub parent: Option<String>,
     /// The dialog sheet: Tab stays inside it while it is open.
     pub focus: FocusHandle,
     /// The contact link was copied; the button says so until the dialog closes.
     pub copied: bool,
+    pub parent_from_context: bool,
 }
 impl MatrixApp {
     pub fn open_management(
@@ -108,12 +110,7 @@ impl MatrixApp {
             .as_ref()
             .and_then(|p| p.directory.as_ref().map(|d| d.space.clone()))
             .or_else(|| self.navigation.selected_space.clone())
-            .filter(|id| {
-                self.snapshot
-                    .spaces
-                    .iter()
-                    .any(|s| &s.id == id && s.can_add_rooms)
-            });
+            .filter(|id| self.snapshot.spaces.iter().any(|s| &s.id == id));
         // The status dialog opens on the current status, ready to edit.
         let current_status = matches!(kind, ManageKind::StatusMessage)
             .then(|| {
@@ -181,6 +178,8 @@ impl MatrixApp {
             name,
             topic,
             encrypted: true,
+            voice_channel: false,
+            parent_from_context: initial_parent.is_some(),
             parent: initial_parent,
             focus: cx.focus_handle(),
             copied: false,
@@ -326,6 +325,11 @@ impl MatrixApp {
                             }
                         } else {
                             let space = matches!(page.kind, ManageKind::JoinSpace);
+                            if matches!(page.kind, ManageKind::Dm) {
+                                this.navigation.selected_space = None;
+                            } else if matches!(page.kind, ManageKind::Create) {
+                                this.navigation.selected_space = page.parent.clone();
+                            }
                             this.management = None;
                             if space {
                                 this.select_space(Some(id), window, cx);
@@ -457,7 +461,7 @@ impl MatrixApp {
         match kind {
             ManageKind::Directory(_) => "Browse Rooms",
             ManageKind::Leave(_) => "Leave Space",
-            ManageKind::Create => "Create Room",
+            ManageKind::Create => "Create Channel",
             ManageKind::Dm => "Start a Direct Message",
             ManageKind::JoinSpace => "Join a Space",
             ManageKind::InviteMember(_) => "Invite People",
@@ -728,67 +732,112 @@ impl MatrixApp {
                             .child(Input::new(&page.topic).aria_label("Room topic")),
                     );
                 body = body.child(
-                    Button::new("room-encryption")
-                        .outline()
-                        .label("Encrypt messages and files")
-                        .selected(page.encrypted)
-                        .toggled(page.encrypted)
-                        .disabled(page.busy)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(p) = &mut this.management {
-                                p.encrypted = !p.encrypted;
-                            }
-                            cx.notify();
-                        })),
+                    h_flex()
+                        .justify_between()
+                        .gap(px(12.))
+                        .py(px(4.))
+                        .child("Voice channel")
+                        .child(
+                            switch::Switch::new("voice-channel-kind")
+                                .accessibility_label("Voice channel")
+                                .checked(page.voice_channel)
+                                .color(cx.theme().primary)
+                                .disabled(page.busy)
+                                .on_change(cx.listener(|this, checked: &bool, _, cx| {
+                                    if let Some(page) = &mut this.management {
+                                        page.voice_channel = *checked;
+                                        if page.voice_channel {
+                                            page.encrypted = true;
+                                        }
+                                    }
+                                    cx.notify();
+                                })),
+                        ),
                 );
-                body = body.child("Space (optional)").child(
-                    Button::new("parent-home")
-                        .ghost()
-                        .label("No space")
-                        .selected(page.parent.is_none())
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(p) = &mut this.management {
-                                p.parent = None;
-                            }
-                            cx.notify();
-                        })),
-                );
-                for space in self.snapshot.spaces.iter().filter(|s| s.can_add_rooms) {
-                    let id = space.id.clone();
+                if !page.voice_channel {
                     body = body.child(
-                        Button::new(SharedString::from(format!("parent-{id}")))
-                            .ghost()
-                            .label(space.name.clone())
-                            .selected(page.parent.as_ref() == Some(&space.id))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(p) = &mut this.management {
-                                    p.parent = Some(id.clone());
-                                }
-                                cx.notify();
-                            })),
+                        h_flex()
+                            .justify_between()
+                            .gap(px(12.))
+                            .py(px(4.))
+                            .child("Encrypt messages and files")
+                            .child(
+                                switch::Switch::new("room-encryption")
+                                    .accessibility_label("Encrypt messages and files")
+                                    .checked(page.encrypted)
+                                    .color(cx.theme().primary)
+                                    .disabled(page.busy)
+                                    .on_change(cx.listener(|this, checked: &bool, _, cx| {
+                                        if let Some(page) = &mut this.management {
+                                            page.encrypted = *checked;
+                                        }
+                                        cx.notify();
+                                    })),
+                            ),
                     );
+                }
+                // The creating space is fixed by the place the form was opened.
+                // A picker is only needed for the global keyboard entry point.
+                if !page.parent_from_context {
+                    body = body.child("Choose a space");
+                    // Keep joined spaces selectable even when cached permission
+                    // metadata is incomplete. Core refreshes state and enforces
+                    // creation permissions before sending any create request.
+                    for space in &self.snapshot.spaces {
+                        let id = space.id.clone();
+                        body = body.child(
+                            Button::new(SharedString::from(format!("parent-{id}")))
+                                .ghost()
+                                .label(space.name.clone())
+                                .selected(page.parent.as_ref() == Some(&space.id))
+                                .when(page.parent.as_ref() == Some(&space.id), |button| {
+                                    button
+                                        .bg(cx.theme().primary)
+                                        .border_color(cx.theme().primary)
+                                        .text_color(cx.theme().primary_foreground)
+                                })
+                                .disabled(page.busy)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(p) = &mut this.management {
+                                        p.parent = Some(id.clone());
+                                    }
+                                    cx.notify();
+                                })),
+                        );
+                    }
                 }
                 let name = page.name.clone();
                 let topic = page.topic.clone();
                 let parent = page.parent.clone();
                 let encrypted = page.encrypted;
+                let voice_channel = page.voice_channel;
                 body = body.child(
                     Button::new("create-room-submit")
                         .primary()
-                        .label("Create Room")
+                        .label(if voice_channel {
+                            "Create Voice Channel"
+                        } else {
+                            "Create Text Channel"
+                        })
                         .disabled(
                             self.preview
                                 || page.busy
-                                || page.name.read(cx).value().trim().is_empty(),
+                                || page.name.read(cx).value().trim().is_empty()
+                                || parent.is_none(),
                         )
                         .on_click(cx.listener(move |this, _, window, cx| {
+                            let draft = CreateRoom {
+                                name: name.read(cx).value().to_string(),
+                                topic: topic.read(cx).value().to_string(),
+                                encrypted,
+                                parent: parent.clone(),
+                            };
                             this.run_space_action(
-                                SpaceAction::Create(CreateRoom {
-                                    name: name.read(cx).value().to_string(),
-                                    topic: topic.read(cx).value().to_string(),
-                                    encrypted,
-                                    parent: parent.clone(),
-                                }),
+                                if voice_channel {
+                                    SpaceAction::CreateVoice(draft)
+                                } else {
+                                    SpaceAction::Create(draft)
+                                },
                                 window,
                                 cx,
                             )
