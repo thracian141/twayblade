@@ -39,3 +39,4 @@ debug = 0
 [patch.crates-io]
 libwebrtc = { path = "vendor/libwebrtc-0.4.0" }
 webrtc-sys = { path = "vendor/webrtc-sys-0.3.53" }
+gpui-component = { path = "vendor/gpui-component-0.9.1" }
