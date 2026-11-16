@@ -36,6 +36,8 @@ pub(crate) enum ManageKind {
     SignOut,
     /// Set or change your status message.
     StatusMessage,
+    /// Public rooms of your server or a large public homeserver.
+    Explore,
 }
 impl ManageKind {
     /// Short forms open as a small centred dialog; browsing and leaving keep
@@ -122,15 +124,14 @@ impl MatrixApp {
             })
             .flatten()
             .unwrap_or_default();
-        let status_dialog = matches!(kind, ManageKind::StatusMessage);
         let name = cx.new(|cx| {
             let input = InputState::new(window, cx);
-            if status_dialog {
-                input
+            match kind {
+                ManageKind::StatusMessage => input
                     .placeholder("What are you up to?")
-                    .default_value(current_status)
-            } else {
-                input
+                    .default_value(current_status),
+                ManageKind::Explore => input.placeholder("Search rooms by name or topic"),
+                _ => input,
             }
         });
         let topic = cx.new(|cx| InputState::new(window, cx));
@@ -140,7 +141,19 @@ impl MatrixApp {
                 cx.subscribe_in(
                     input,
                     window,
-                    |_, _, _: &gpui_kit::component::input::InputEvent, _, cx| cx.notify(),
+                    |this, _, event: &gpui_kit::component::input::InputEvent, window, cx| {
+                        // Explore searches the directory as you type; the
+                        // backend debounces and drops superseded queries.
+                        if matches!(event, gpui_kit::component::input::InputEvent::Change)
+                            && this
+                                .management
+                                .as_ref()
+                                .is_some_and(|page| matches!(page.kind, ManageKind::Explore))
+                        {
+                            this.explore_search(window, cx);
+                        }
+                        cx.notify()
+                    },
                 )
             })
             .collect();
@@ -181,9 +194,8 @@ impl MatrixApp {
                 | ManageKind::Dm
                 | ManageKind::JoinSpace
                 | ManageKind::InviteMember(_)
-                | ManageKind::StatusMessage => {
-                    page.name.update(cx, |state, cx| state.focus(window, cx))
-                }
+                | ManageKind::StatusMessage
+                | ManageKind::Explore => page.name.update(cx, |state, cx| state.focus(window, cx)),
                 ManageKind::LeaveRoom(_) | ManageKind::InviteContact | ManageKind::SignOut => {
                     page.focus.focus(window, cx)
                 }
@@ -453,6 +465,7 @@ impl MatrixApp {
             ManageKind::InviteContact => "Invite a Contact",
             ManageKind::SignOut => "Sign Out",
             ManageKind::StatusMessage => "Status Message",
+            ManageKind::Explore => "Explore Rooms",
         }
     }
 
@@ -918,6 +931,11 @@ impl MatrixApp {
                             .w_full()
                             .child(Input::new(&page.name).aria_label("Matrix ID")),
                     )
+                    .child(self.people_suggestions(
+                        page.name.read(cx).value().as_ref(),
+                        Some(&room),
+                        cx,
+                    ))
                     .child(
                         Button::new("invite-submit")
                             .primary()
@@ -936,6 +954,9 @@ impl MatrixApp {
                                 );
                             })),
                     );
+            }
+            ManageKind::Explore => {
+                body = body.child(self.explore_body(cx));
             }
             ManageKind::StatusMessage => {
                 use twayblade_core::presence::State;
@@ -998,19 +1019,28 @@ impl MatrixApp {
             }
             ManageKind::Dm | ManageKind::JoinSpace => {
                 let dm = matches!(page.kind, ManageKind::Dm);
-                body =
-                    body.child(if dm {
+                body = body
+                    .child(if dm {
                         "Matrix ID (for example, @name:example.org)"
                     } else {
                         "Space ID or alias"
                     })
-                    .child(div().w_full().child(
-                        Input::new(&page.name).aria_label(if dm {
-                            "Matrix ID"
-                        } else {
-                            "Space ID or alias"
-                        }),
-                    ));
+                    .child(
+                        div()
+                            .w_full()
+                            .child(Input::new(&page.name).aria_label(if dm {
+                                "Matrix ID"
+                            } else {
+                                "Space ID or alias"
+                            })),
+                    )
+                    .when(dm, |body| {
+                        body.child(self.people_suggestions(
+                            page.name.read(cx).value().as_ref(),
+                            None,
+                            cx,
+                        ))
+                    });
                 let input = page.name.clone();
                 body = body.child(
                     Button::new("membership-submit")
@@ -1079,6 +1109,158 @@ impl MatrixApp {
                     ),
             )
             .child(body)
+            .into_any_element()
+    }
+}
+
+/// Someone you already have a direct conversation with.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct KnownPerson {
+    pub user_id: String,
+    pub name: String,
+    pub avatar: Option<String>,
+    /// Their direct conversation, which Start a Direct Message reopens.
+    pub room: String,
+}
+
+/// People from your direct conversations, most recent first, matching
+/// `filter` (name or Matrix ID, case-insensitive), at most `limit`.
+pub(crate) fn known_people(
+    rooms: &[crate::backend::Room],
+    filter: &str,
+    exclude: &[String],
+    limit: usize,
+) -> Vec<KnownPerson> {
+    let filter = filter.trim().to_lowercase();
+    let mut direct: Vec<_> = rooms
+        .iter()
+        .filter(|room| room.direct && !room.archived)
+        .filter_map(|room| room.partner.as_ref().map(|partner| (room, partner)))
+        .collect();
+    direct.sort_by_key(|(room, _)| std::cmp::Reverse(room.recency));
+    let mut people: Vec<KnownPerson> = Vec::new();
+    for (room, partner) in direct {
+        if people.iter().any(|p| &p.user_id == partner) || exclude.contains(partner) {
+            continue;
+        }
+        if !filter.is_empty()
+            && !room.name.to_lowercase().contains(&filter)
+            && !partner.to_lowercase().contains(&filter)
+        {
+            continue;
+        }
+        people.push(KnownPerson {
+            user_id: partner.clone(),
+            name: room.name.clone(),
+            avatar: room.avatar.clone(),
+            room: room.id.clone(),
+        });
+        if people.len() == limit {
+            break;
+        }
+    }
+    people
+}
+
+impl MatrixApp {
+    /// People you know under the Matrix ID field. In the invite dialog a
+    /// pick fills the field (members of `invite_room` are left out); in
+    /// Start a Direct Message it reopens your conversation with them.
+    fn people_suggestions(
+        &self,
+        filter: &str,
+        invite_room: Option<&String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let exclude: Vec<String> = if invite_room.is_some() {
+            self.snapshot
+                .members
+                .iter()
+                .map(|member| member.user_id.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let people = known_people(&self.snapshot.rooms, filter, &exclude, 6);
+        if people.is_empty() {
+            return div().into_any_element();
+        }
+        let muted = cx.theme().muted_foreground;
+        let invite = invite_room.is_some();
+        v_flex()
+            .id("people-suggestions")
+            .role(Role::Group)
+            .aria_label("People you know")
+            .w_full()
+            .gap(px(2.))
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(muted)
+                    .child("People you know"),
+            )
+            .children(people.into_iter().map(|person| {
+                let label = if invite {
+                    format!("Invite {} ({})", person.name, person.user_id)
+                } else {
+                    format!("Open your conversation with {}", person.name)
+                };
+                let KnownPerson {
+                    user_id,
+                    name,
+                    avatar,
+                    room,
+                } = person;
+                Button::new(SharedString::from(format!("suggest-{user_id}")))
+                    .ghost()
+                    .w_full()
+                    .h(px(40.))
+                    .px(px(6.))
+                    .justify_start()
+                    .rounded(px(6.))
+                    .accessibility_label(label)
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .gap(px(10.))
+                            .child(self.avatar_image(
+                                avatar.as_deref(),
+                                &user_id,
+                                &name,
+                                28.,
+                                14.,
+                                cx,
+                            ))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(div().truncate().text_left().child(name))
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .text_left()
+                                            .text_size(px(11.))
+                                            .text_color(muted)
+                                            .child(user_id.clone()),
+                                    ),
+                            ),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if invite {
+                            if let Some(page) = &this.management {
+                                page.name.update(cx, |state, cx| {
+                                    state.set_value(user_id.clone(), window, cx)
+                                });
+                            }
+                        } else {
+                            this.close_management_page(window, cx);
+                            this.select_room(room.clone(), window, cx);
+                        }
+                        cx.notify();
+                    }))
+            }))
             .into_any_element()
     }
 }

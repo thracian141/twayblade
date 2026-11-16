@@ -97,6 +97,9 @@ impl MatrixApp {
         let Some(room) = self.navigation.selected_room.clone() else {
             return;
         };
+        // People picked in another thread's reply don't carry over.
+        self.thread_mentions.clear();
+        self.mention_completion = None;
         let before = self.current_nav_page();
         self.pending_history_thread = None;
         self.management = None;
@@ -127,6 +130,8 @@ impl MatrixApp {
                         if matches!(event, InputEvent::Change) {
                             let text = state.read(cx).value().to_string();
                             this.edit_text_changed(true, &text);
+                            let cursor = state.read(cx).cursor();
+                            this.update_mention_completion(true, text, cursor);
                         }
                         if matches!(event, InputEvent::PressEnter { .. }) {
                             this.send_thread(window, cx);
@@ -399,6 +404,7 @@ impl MatrixApp {
         let root = t.root.event_id.clone().expect("remote root");
         let request = t.request;
         let staged = std::mem::take(&mut t.attachments.drafts);
+        let mentions = std::mem::take(&mut self.thread_mentions);
         let stack_request = t.attachments.request;
         let account = self.snapshot.account_instance;
         self.job(
@@ -419,7 +425,13 @@ impl MatrixApp {
                     }
                 }
                 let result = if has_text {
-                    b.thread_action(room, root, account, request, ThreadAction::Send(body))
+                    b.thread_action(
+                        room,
+                        root,
+                        account,
+                        request,
+                        ThreadAction::Send(body, mentions),
+                    )
                 } else {
                     Ok(false)
                 };
@@ -593,6 +605,13 @@ impl MatrixApp {
                     .px(px(12.))
                     .pt(px(4.))
                     .pb(px(12.))
+                    .children(self.mention_panel(true, cx).map(|panel| {
+                        crate::ui::motion::rise(
+                            div().pb(px(4.)).child(panel),
+                            "thread-mention-list-motion",
+                            self.snapshot.reduce_motion,
+                        )
+                    }))
                     .children(self.edit_bar(true, cx))
                     .child(
                         // The main composer's box: the field, then a toolbar

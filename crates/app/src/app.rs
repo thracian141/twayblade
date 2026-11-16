@@ -439,6 +439,20 @@ pub(super) struct MatrixApp {
     pub viewer: Option<crate::ui::viewer::Viewer>,
     /// A profile picture shown full size over the window.
     pub(crate) avatar_viewer: Option<crate::ui::avatar_viewer::AvatarViewer>,
+    /// Explore Rooms: the public server being browsed; None is your own.
+    pub(crate) explore_server: Option<String>,
+    /// The open `@` list and the people picked in each composer.
+    pub(crate) mention_completion: Option<crate::ui::mentions::MentionCompletion>,
+    /// Per room, like the drafts they belong to.
+    pub(crate) mentions: HashMap<String, Vec<twayblade_core::rich_text::Mention>>,
+    pub(crate) thread_mentions: Vec<twayblade_core::rich_text::Mention>,
+    /// The search panel under the title-bar field, and its selected row.
+    pub(crate) spotlight_open: bool,
+    pub(crate) spotlight_selected: usize,
+    /// A press inside the panel: the field's blur must not close it.
+    pub(crate) spotlight_pointer: bool,
+    /// Conversations opened recently, newest first (this session).
+    pub(crate) recent_room_ids: Vec<String>,
     pub viewer_request: u64,
     pub reveal_image: Option<String>,
     pub image_focus: std::cell::RefCell<HashMap<String, FocusHandle>>,
@@ -575,9 +589,23 @@ impl MatrixApp {
             &search,
             window,
             |this, _, event: &InputEvent, window, cx| {
-                // Typing filters conversations; Return searches messages.
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.run_message_search(window, cx);
+                // Focus opens the search panel; typing filters it (and the
+                // sidebar); Return opens the selected row.
+                match event {
+                    InputEvent::Focus => {
+                        this.spotlight_open = true;
+                        this.spotlight_selected = 0;
+                    }
+                    InputEvent::Change => {
+                        this.spotlight_open = true;
+                        this.spotlight_selected = 0;
+                    }
+                    InputEvent::Blur => {
+                        if !this.spotlight_pointer {
+                            this.spotlight_open = false;
+                        }
+                    }
+                    InputEvent::PressEnter { .. } => this.spotlight_enter(window, cx),
                 }
                 cx.notify()
             },
@@ -839,6 +867,14 @@ impl MatrixApp {
             directory_action_request: 0,
             viewer: None,
             avatar_viewer: None,
+            explore_server: None,
+            mention_completion: None,
+            mentions: HashMap::new(),
+            thread_mentions: Vec::new(),
+            spotlight_open: false,
+            spotlight_selected: 0,
+            spotlight_pointer: false,
+            recent_room_ids: Vec::new(),
             viewer_request: 0,
             reveal_image: None,
             image_focus: std::cell::RefCell::new(HashMap::new()),
@@ -1692,6 +1728,7 @@ impl MatrixApp {
     }
 
     pub fn select_room(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.note_recent_room(&id);
         // Opening the room answers its missed calls.
         if let Some(backend) = &self.backend
             && self
@@ -1782,6 +1819,7 @@ impl MatrixApp {
     }
 
     fn activate_composer(&mut self, room: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.mention_completion = None;
         if let Some((state, _)) = self.composers.get(&room) {
             self.composer = state.clone();
             return;
@@ -1809,6 +1847,11 @@ impl MatrixApp {
                         let text = state.read(cx).value().to_string();
                         this.edit_text_changed(false, &text);
                         this.update_emoji_completion(
+                            state.read(cx).value().to_string(),
+                            state.read(cx).cursor(),
+                        );
+                        this.update_mention_completion(
+                            false,
                             state.read(cx).value().to_string(),
                             state.read(cx).cursor(),
                         );
@@ -1949,6 +1992,8 @@ impl MatrixApp {
             .then(|| self.open_reply().map(|reply| reply.event_id.clone()))
             .flatten();
         let sent_reply = reply.clone();
+        let sent_mentions = self.take_mentions(false);
+        self.mention_completion = None;
         let staged = std::mem::take(&mut self.attachments.drafts);
         let attachment_request = self.attachments.request;
         self.job(
@@ -1965,7 +2010,7 @@ impl MatrixApp {
                     }
                 }
                 let result = match sent_body {
-                    Some(text) => backend.send_text(sent_room, text, sent_reply),
+                    Some(text) => backend.send_text(sent_room, text, sent_reply, sent_mentions),
                     None => Ok(()),
                 };
                 (result, Vec::new())
@@ -2550,7 +2595,8 @@ impl MatrixApp {
                 | ManageKind::LeaveRoom(_)
                 | ManageKind::InviteContact
                 | ManageKind::SignOut
-                | ManageKind::StatusMessage => {}
+                | ManageKind::StatusMessage
+                | ManageKind::Explore => {}
             }
         }
         let panel = if self.search_open {

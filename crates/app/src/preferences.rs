@@ -178,6 +178,8 @@ pub(super) struct Appearance {
     /// Spacing of sidebar rows, section headers and menus.
     pub sidebar_density: SidebarDensity,
     pub custom_theme: Option<CustomTheme>,
+    /// A line with the latest message under each conversation in the sidebar.
+    pub room_previews: bool,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -194,6 +196,14 @@ impl SidebarDensity {
             Self::Compact => 26.,
             Self::Regular => 30.,
             Self::Comfortable => 34.,
+        }
+    }
+    /// Row height with a message preview line under the name.
+    pub fn preview_row(self) -> f32 {
+        match self {
+            Self::Compact => 40.,
+            Self::Regular => 46.,
+            Self::Comfortable => 52.,
         }
     }
     /// Extra space above each sidebar section.
@@ -218,6 +228,7 @@ impl Default for Appearance {
             code_font: None,
             sidebar_density: SidebarDensity::Regular,
             custom_theme: None,
+            room_previews: true,
         }
     }
 }

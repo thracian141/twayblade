@@ -303,6 +303,13 @@ impl MatrixApp {
                     self.snapshot.reduce_motion,
                 ))
             })
+            .children(self.mention_panel(false, cx).map(|panel| {
+                motion::rise(
+                    div().child(panel),
+                    "mention-list-motion",
+                    self.snapshot.reduce_motion,
+                )
+            }))
             // A composer box: the message field, then a quiet toolbar row with
             // attach, emoji and send, as in Slack and Mail.
             .child(

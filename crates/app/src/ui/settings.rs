@@ -1230,6 +1230,20 @@ impl MatrixApp {
                         cx,
                     ),
                     form_row("Sidebar density", sidebar_density, cx),
+                    form_row(
+                        "Show message previews",
+                        switch::Switch::new("room-previews")
+                            .accessibility_label("Show message previews in the sidebar")
+                            .checked(appearance.room_previews)
+                            .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                                this.preferences.appearance.room_previews = *checked;
+                                // A new set of rooms to ask previews for.
+                                this.activity_previews_key.clear();
+                                this.appearance_changed(window, cx);
+                                this.sync_activity_previews();
+                            })),
+                        cx,
+                    ),
                 ],
                 cx,
             ))
