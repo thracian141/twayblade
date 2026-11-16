@@ -23,6 +23,8 @@
 
 ## Not verified
 
+- Rooms the SDK did not track yet get a second request two seconds later.
+  Local Synapse `run.sh activity` passes.
 - A live account: how quickly previews fill in for rooms the SDK has not
   tracked yet (the first request starts tracking; the preview may appear on
   the next activity).

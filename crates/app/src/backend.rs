@@ -974,7 +974,13 @@ impl Backend {
         let shared = self.state.clone();
         let updates = self.updates.clone();
         state.activity_task = Some(self.runtime.spawn(async move {
-            let previews = account.room_previews(&rooms).await;
+            let mut previews = account.room_previews(&rooms).await;
+            // The first request starts tracking rooms the SDK did not follow
+            // yet; their latest event is ready a moment later, so ask once more.
+            if previews.len() < rooms.len() {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                previews = account.room_previews(&rooms).await;
+            }
             let Ok(state) = shared.lock() else {
                 return;
             };
