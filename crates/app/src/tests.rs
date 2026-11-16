@@ -1559,7 +1559,7 @@ fn viewer_and_dialogs_are_named_for_screen_readers(cx: &mut TestAppContext) {
             app.open_management(crate::ui::spaces::ManageKind::Create, window, cx)
         });
         window.render_frame(cx);
-        assert!(window.find_by_label("Create Room").visible());
+        assert!(window.find_by_label("Create Channel").visible());
     })
     .expect("dialog label");
     // A side panel is a named region.
@@ -3960,15 +3960,15 @@ fn mouse_back_and_forward_navigate_across_spaces_and_skip_invalid_entries(cx: &m
     let (window, app) = preview_window(cx);
     cx.update_window(window, |_, window, cx| {
         window.render_frame(cx);
-        assert_eq!(window.find("nav-back").disabled(), Some(true));
-        assert_eq!(window.find("nav-forward").disabled(), Some(true));
+        assert!(!app.read(cx).can_navigate(true));
+        assert!(!app.read(cx).can_navigate(false));
 
         // Design space: #general -> #critique -> Home -> #notes.
         window.click("room-critique", cx);
         window.click("home", cx);
         window.click("room-notes", cx);
         window.render_frame(cx);
-        assert_eq!(window.find("nav-back").disabled(), None);
+        assert!(app.read(cx).can_navigate(true));
 
         // Mouse Back from Home #notes skips the empty Home transition and returns
         // straight to Design space #critique.
@@ -4021,10 +4021,12 @@ fn mouse_back_and_forward_navigate_across_spaces_and_skip_invalid_entries(cx: &m
     });
 
     cx.update_window(window, |_, window, cx| {
-        window.click("nav-back", cx);
+        // The compact title bar has no Back button; ⌘[ goes back.
+        app.update(cx, |app, cx| app.focus.focus(window, cx));
+        window.dispatch_action(Box::new(crate::app::NavigateBack), cx);
         window.render_frame(cx);
     })
-    .expect("titlebar back to critique");
+    .expect("keyboard back to critique");
     cx.update(|cx| {
         assert_eq!(
             app.read(cx).navigation.selected_room.as_deref(),
@@ -4039,7 +4041,7 @@ fn mouse_back_and_forward_navigate_across_spaces_and_skip_invalid_entries(cx: &m
             cx.notify();
         });
         window.render_frame(cx);
-        assert_eq!(window.find("nav-back").disabled(), Some(true));
+        assert!(!app.read(cx).can_navigate(true));
         app.update(cx, |app, cx| app.focus.focus(window, cx));
         window.render_frame(cx);
         window.dispatch_action(Box::new(crate::app::NavigateForward), cx);
@@ -4208,7 +4210,7 @@ fn back_and_forward_navigate_pages_panels_and_prune_on_close(cx: &mut TestAppCon
     cx.update_window(window, |_, window, cx| {
         window.click("close-management", cx);
         window.render_frame(cx);
-        assert_eq!(window.find("nav-back").disabled(), Some(true));
+        assert!(!app.read(cx).can_navigate(true));
     })
     .expect("close-management prunes directory chain");
 }

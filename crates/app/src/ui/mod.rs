@@ -383,7 +383,8 @@ impl Render for MatrixApp {
                                                 .on_click(|_, _, cx| cx.stop_propagation())
                                                 .child(self.management_view(cx))
                                                 // Tab cycles inside the sheet; the trap also tracks its focus.
-                                                .focus_trap("management-dialog", &sheet_focus),
+                                                .focus_trap("management-dialog", &sheet_focus)
+                                                .test_support(),
                                         ),
                                         "management-dialog-motion",
                                         reduce,
