@@ -73,7 +73,7 @@ const SIDEBAR_WIDTH: f32 = 240.;
 const DETAILS_WIDTH: f32 = 280.;
 const BUBBLE_MAX_WIDTH: f32 = 520.;
 const MEMBER_ROW_HEIGHT: f32 = 30.;
-/// Unified toolbar height, matching a macOS window with a toolbar.
+/// Conversation and secondary toolbar row height.
 pub(crate) const TOOLBAR_HEIGHT: f32 = 52.;
 /// Clearance for the traffic lights at the left of the macOS toolbar.
 const TRAFFIC_LIGHTS_WIDTH: f32 = 78.;
@@ -552,7 +552,7 @@ impl Render for MatrixApp {
             // Full-screen flows (sign-in, settings, recovery) still need a title-bar
             // row on macOS: it clears the traffic lights and moves the window.
             .when(!workspace && cfg!(target_os = "macos"), |view| {
-                view.child(self.toolbar("window-toolbar", cx))
+                view.child(self.toolbar("window-toolbar", cx).h(px(32.)))
             })
             .child(
                 div()

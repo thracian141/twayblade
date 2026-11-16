@@ -155,6 +155,8 @@ impl Conversation {
         })
     }
     pub async fn send_attachment(&self, draft: AttachmentDraft) -> Result<(), AttachmentError> {
+        self.ensure_text_channel()
+            .map_err(|_| AttachmentError::Unavailable)?;
         let maximum = self.upload_limit().await?;
         if draft.size > maximum {
             return Err(AttachmentError::Limit { maximum });

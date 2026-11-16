@@ -2272,6 +2272,100 @@ async fn spaces_hierarchy_invites_creation_restricted_join_and_selective_leave()
         "created child encryption",
     );
     let mut spaces = Box::pin(bob.space_updates());
+    assert!(matches!(
+        alice
+            .create_room(CreateRoom {
+                name: "No parent".into(),
+                ..Default::default()
+            })
+            .await,
+        Err(crate::space_actions::SpaceError::SpaceRequired)
+    ));
+    assert!(matches!(
+        alice
+            .create_voice_channel(CreateRoom {
+                name: "No parent".into(),
+                ..Default::default()
+            })
+            .await,
+        Err(crate::space_actions::SpaceError::SpaceRequired)
+    ));
+    let voice = checked(
+        alice
+            .create_voice_channel(CreateRoom {
+                name: "Isolated voice channel".into(),
+                parent: Some(parent_id.to_string()),
+                encrypted: false,
+                ..Default::default()
+            })
+            .await,
+        "create voice channel",
+    );
+    checked(
+        bob.join_room_or_space(&voice, vec![via.to_string()]).await,
+        "space member joins voice channel",
+    );
+    let voice_id = matrix_sdk::ruma::RoomId::parse(&voice).expect("voice channel ID");
+    wait_for_room(&bob, &voice_id).await;
+    let _voice_sync = checked(
+        bob.sync_rooms(vec![voice_id.clone()]).await,
+        "voice channel state",
+    );
+    let voice_room = bob
+        .client
+        .get_room(&voice_id)
+        .expect("joined voice channel");
+    assert_eq!(
+        crate::channels::ChannelKind::of(&voice_room),
+        crate::channels::ChannelKind::Voice
+    );
+    assert!(
+        voice_room.encryption_state().is_encrypted(),
+        "voice room encryption cannot be disabled"
+    );
+    let powers = checked(voice_room.power_levels().await, "voice channel permissions");
+    let bob_id = bob.client.user_id().expect("Bob");
+    assert!(powers.user_can_send_state(bob_id, crate::calls::native::MEMBER_EVENT.into()));
+    assert!(!powers.user_can_send_message(
+        bob_id,
+        matrix_sdk::ruma::events::MessageLikeEventType::RoomMessage
+    ));
+    assert!(!powers.user_can_send_message(
+        bob_id,
+        matrix_sdk::ruma::events::MessageLikeEventType::RoomEncrypted
+    ));
+    assert!(matches!(
+        crate::calls::NativeCall::start(&bob, &voice, true).await,
+        Err(crate::calls::CallError::InvalidRoom)
+    ));
+    bob.select_room(Some(&voice));
+    let mut voice_updates = Box::pin(bob.conversation_updates(voice.clone(), 1));
+    let voice_conversation = checked(
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let snapshot = voice_updates.next().await.expect("voice snapshot stream");
+                if let Some(conversation) = snapshot.conversation {
+                    break conversation;
+                }
+            }
+        })
+        .await,
+        "voice conversation contract",
+    );
+    assert!(matches!(
+        voice_conversation
+            .send("Must not be sent".into(), &[])
+            .await,
+        Err(crate::conversation::ConversationError::VoiceOnly)
+    ));
+    assert!(matches!(
+        voice_conversation
+            .send_reply("Must not be sent".into(), "$reply:example.org", &[])
+            .await,
+        Err(crate::conversation::ConversationError::VoiceOnly)
+    ));
+    drop(voice_updates);
+    bob.select_room(None);
     checked(
         tokio::time::timeout(Duration::from_secs(30), async {
             while let Some(snapshot) = spaces.next().await {
@@ -2298,6 +2392,81 @@ async fn spaces_hierarchy_invites_creation_restricted_join_and_selective_leave()
     assert!(
         plan.rooms.iter().any(|r| r.id == encrypted && r.shared),
         "shared child must be offered explicitly"
+    );
+    // Leaving a subspace must hide its tile without moving still-joined
+    // conversations out of the parent. The SDK's joined graph drops the left
+    // space's outgoing links, so this also verifies cached SDK state survives.
+    let nested_only = checked(
+        alice
+            .create_room(CreateRoom {
+                name: "Nested-only conversation".into(),
+                parent: Some(nested_id.to_string()),
+                encrypted: true,
+                ..Default::default()
+            })
+            .await,
+        "create nested-only conversation",
+    );
+    checked(
+        bob.join_room_or_space(&nested_only, vec![via.to_string()])
+            .await,
+        "join nested-only conversation",
+    );
+    let _nested_state = checked(
+        bob.sync_rooms(vec![nested_id.clone()]).await,
+        "cache nested hierarchy",
+    );
+    checked(
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let snapshot = spaces
+                    .next()
+                    .await
+                    .expect("space stream must remain active");
+                if snapshot.spaces.iter().any(|space| {
+                    space.id == parent_id.as_str() && space.room_ids.contains(&nested_only)
+                }) {
+                    break;
+                }
+            }
+        })
+        .await,
+        "nested room visible under parent before leaving",
+    );
+    checked(
+        bob.client
+            .get_room(&nested_id)
+            .expect("joined nested space")
+            .leave()
+            .await,
+        "leave nested space only",
+    );
+    checked(
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let snapshot = spaces
+                    .next()
+                    .await
+                    .expect("space stream must remain active");
+                if !snapshot
+                    .spaces
+                    .iter()
+                    .any(|space| space.id == nested_id.as_str())
+                    && snapshot.spaces.iter().any(|space| {
+                        space.id == parent_id.as_str() && space.room_ids.contains(&nested_only)
+                    })
+                {
+                    break;
+                }
+            }
+        })
+        .await,
+        "parent retains joined conversation through left nested space",
+    );
+    assert!(
+        bob.client
+            .get_room(&matrix_sdk::ruma::RoomId::parse(&nested_only).unwrap())
+            .is_some_and(|room| room.state() == matrix_sdk::RoomState::Joined)
     );
     checked(
         plan.leave(std::collections::HashSet::from([parent_id.to_string()]))

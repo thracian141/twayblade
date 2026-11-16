@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/twayblade-icon-transparent.png" alt="Twayblade app icon" width="160" height="160">
+
 # Twayblade
 
 **A native Matrix client for macOS, Linux and Windows, written in Rust.**

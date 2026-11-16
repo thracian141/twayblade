@@ -21,6 +21,7 @@ Element Call.
 | Storage | SDK SQLite stores, encrypted with a passphrase held in the OS credential store. No plaintext fallback. Logout and failed sign-in delete the local store. |
 | Instances | One running instance per OS user, enforced by a lock file in the app data directory. |
 | Calls | Native (decision 2026-11-11, replacing the Element Call web runtime): MatrixRTC signalling in `core` through the Matrix SDK (call membership, call-key exchange over encrypted to-device messages), media through the LiveKit Rust SDK with end-to-end frame encryption, and a GPUI call interface. Interoperates with Element Call. Legacy `m.call.*` is out of scope for 1.0. |
+| Channels | Text and audio-only voice channels are created inside a joined space. DMs live in Home; subspaces remain separate navigation entries. Voice uses native MatrixRTC with mandatory room/media encryption; live acceptance is pending. |
 | Appearance | Default: system light/dark and system accent, neutral surfaces, contrasting foregrounds. Users can override scheme, accent, fonts, scale and chat style in Settings (M4). |
 | Settings | A native-style Settings window (⌘,) with sections. Preferences are stored locally as plain JSON, never with credentials. Notification rules are Matrix push rules on the server, so they sync with other clients. |
 | Accounts | Several saved accounts with switching (decision 2026-11-15, moved into 1.0 from the deferred list): one OS credential slot per account plus a non-secret index. Phase 1 syncs only the open account. |

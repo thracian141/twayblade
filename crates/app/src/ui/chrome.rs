@@ -90,7 +90,7 @@ impl MatrixApp {
         };
         h_flex()
             .relative()
-            .w(px(RAIL_WIDTH))
+            .w_full()
             .h(px(36.))
             .justify_center()
             .child(
@@ -150,7 +150,9 @@ impl MatrixApp {
             .snapshot
             .rooms
             .iter()
-            .filter(|room| !room.is_space && !room.muted && !in_any_space(&room.id))
+            .filter(|room| {
+                !room.is_space && !room.muted && (room.direct || !in_any_space(&room.id))
+            })
             .fold(0u64, |sum, room| sum.saturating_add(room.unread));
         let mut rail = v_flex()
             .id("space-rail")
@@ -186,7 +188,12 @@ impl MatrixApp {
                 .snapshot
                 .rooms
                 .iter()
-                .filter(|room| !room.is_space && !room.muted && space.room_ids.contains(&room.id))
+                .filter(|room| {
+                    !room.is_space
+                        && !room.direct
+                        && !room.muted
+                        && space.room_ids.contains(&room.id)
+                })
                 .fold(0u64, |sum, room| sum.saturating_add(room.unread));
             // A space's own picture fills the tile; initials remain the fallback.
             let label = if space.avatar.is_some() {
@@ -217,6 +224,7 @@ impl MatrixApp {
             rail = rail.child(
                 div()
                     .id(SharedString::from(format!("space-context-{}", space.id)))
+                    .w_full()
                     .child(tile)
                     .context_menu(move |menu, _, _| {
                         let browse = browse_id.clone();
@@ -283,7 +291,12 @@ impl MatrixApp {
         // Two-line rows get a larger picture, as in Mail and Messages.
         let size = if two_lines { 30. } else { 16. };
         // DMs and rooms with their own picture show it; others show # or a lock.
-        let icon = if room.direct || room.avatar.is_some() {
+        let icon = if room.channel_kind == twayblade_core::channels::ChannelKind::Voice {
+            Icon::new(IconName::Mic)
+                .size(px(12.))
+                .text_color(muted)
+                .into_any_element()
+        } else if room.direct || room.avatar.is_some() {
             let avatar = self
                 .avatar_image(
                     room.avatar.as_deref(),
@@ -1047,56 +1060,55 @@ impl MatrixApp {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(title),
                     )
-                    .child(
-                        Button::new("new-room")
-                            .ghost()
-                            .size(px(26.))
-                            .icon(IconName::Plus)
-                            .accessibility_label("Create a room")
-                            .tooltip("Create Room…  ⇧⌘N")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_management(
-                                    crate::ui::spaces::ManageKind::Create,
-                                    window,
-                                    cx,
-                                )
-                            })),
-                    )
-                    .child(
-                        Button::new("new-dm")
-                            .size(px(26.))
-                            .rounded(px(7.))
-                            .icon(IconName::SquarePen)
-                            .accessibility_label("Start a direct message")
-                            .tooltip("New Direct Message…  ⌘N")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_management(crate::ui::spaces::ManageKind::Dm, window, cx)
-                            })),
-                    ),
+                    .when(self.navigation.selected_space.is_some(), |header| {
+                        header.child(
+                            Button::new("new-room")
+                                .disabled(self.navigation.selected_space.is_none())
+                                .ghost()
+                                .size(px(26.))
+                                .icon(IconName::Plus)
+                                .accessibility_label("Create a room")
+                                .tooltip("Create Room…  ⇧⌘N")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::Create,
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        )
+                    })
+                    .when(self.navigation.selected_space.is_none(), |header| {
+                        header.child(
+                            Button::new("new-dm")
+                                .size(px(26.))
+                                .rounded(px(7.))
+                                .icon(IconName::SquarePen)
+                                .accessibility_label("Start a direct message")
+                                .tooltip("New Direct Message…  ⌘N")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_management(
+                                        crate::ui::spaces::ManageKind::Dm,
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        )
+                    }),
             )
             .child(list)
             .into_any_element()
     }
 
-    /// The window title bar: navigation on the left, search in the middle,
+    /// The window title bar: native window controls, search in the middle,
     /// status and account on the right. On macOS it is also the drag region.
     pub(crate) fn window_titlebar(&self, cx: &mut Context<Self>) -> AnyElement {
         let palette = theme::palette(cx);
         let muted = cx.theme().muted_foreground;
         let user = self.snapshot.user_id.clone();
         let connected = self.snapshot.sync_status.starts_with("Connected");
-        let nav_button = |id: &'static str, icon: IconName, label: &'static str, enabled: bool| {
-            Button::new(id)
-                .ghost()
-                .size(px(26.))
-                .icon(icon)
-                .accessibility_label(label)
-                .tooltip(label)
-                .disabled(!enabled)
-                .toolbar_control()
-        };
         self.toolbar("window-titlebar", cx)
-            .h(px(40.))
+            .h(px(if cfg!(target_os = "macos") { 32. } else { 40. }))
             .gap(px(12.))
             .pl(px(if cfg!(target_os = "macos") {
                 TRAFFIC_LIGHTS_WIDTH
@@ -1107,46 +1119,7 @@ impl MatrixApp {
             .bg(palette.chrome)
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(2.))
-                    .child(
-                        nav_button(
-                            "toggle-sidebar",
-                            IconName::PanelLeft,
-                            "Toggle Sidebar  ⌃⌘S",
-                            true,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.sidebar_open = !this.sidebar_open;
-                            cx.notify();
-                        })),
-                    )
-                    .child(
-                        nav_button(
-                            "nav-back",
-                            IconName::ChevronLeft,
-                            "Back  ⌘[",
-                            self.can_navigate(true),
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.navigate_history(true, window, cx)
-                        })),
-                    )
-                    .child(
-                        nav_button(
-                            "nav-forward",
-                            IconName::ChevronRight,
-                            "Forward  ⌘]",
-                            self.can_navigate(false),
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.navigate_history(false, window, cx)
-                        })),
-                    ),
-            )
+            .child(div().flex_1().min_w_0())
             .child(
                 div()
                     .id("title-search")

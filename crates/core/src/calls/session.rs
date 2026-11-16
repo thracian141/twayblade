@@ -85,6 +85,9 @@ impl From<twayblade_platform::media_permissions::PermissionError> for CallError 
 }
 impl NativeCall {
     pub async fn start(account: &Account, room: &str, video: bool) -> Result<Self, CallError> {
+        if video && account.is_voice_channel(room) {
+            return Err(CallError::InvalidRoom);
+        }
         let lease = account
             .call_slot
             .clone()
@@ -233,6 +236,11 @@ impl NativeCall {
     }
     /// Call only for a new call, after membership is visible. Joins never notify.
     pub async fn ring(&mut self, video: bool) -> Result<(), CallError> {
+        if crate::channels::ChannelKind::of(&self.signalling.room)
+            == crate::channels::ChannelKind::Voice
+        {
+            return Ok(());
+        }
         use super::ringing::*;
         let room = &self.signalling.room;
         if members(room)
@@ -301,6 +309,14 @@ impl NativeCall {
         Ok(self.media.playback(id))
     }
     pub async fn control(&mut self, control: NativeControl) -> Result<(), CallError> {
+        if matches!(
+            &control,
+            NativeControl::Video(true) | NativeControl::Screen(true)
+        ) && crate::channels::ChannelKind::of(&self.signalling.room)
+            == crate::channels::ChannelKind::Voice
+        {
+            return Err(CallError::InvalidRoom);
+        }
         match control {
             NativeControl::Leave => return self.leave().await,
             NativeControl::ParticipantVolume(id, volume) => {

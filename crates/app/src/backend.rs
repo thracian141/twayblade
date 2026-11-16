@@ -371,6 +371,7 @@ pub(super) enum SpaceAction {
     PlanLeave(String),
     Leave(String, std::collections::HashSet<String>),
     Create(twayblade_core::space_actions::CreateRoom),
+    CreateVoice(twayblade_core::space_actions::CreateRoom),
     Dm(String),
     InviteMember(String, String),
     LeaveRoom(String),
@@ -386,6 +387,7 @@ fn space_failure(error: twayblade_core::space_actions::SpaceError) -> ServiceErr
     use twayblade_core::space_actions::SpaceError::*;
     failure(match error {
         InvalidId => "Enter a valid Matrix room or user ID and a room name when creating a room.",
+        SpaceRequired => "Choose a space for this channel. Channels cannot be created in Home.",
         NotSpace => "This ID belongs to a room. Enter a space ID or alias.",
         Unavailable => "This space or invitation is no longer available. Refresh and try again.",
         Permission => "You do not have permission to add rooms to this space.",
@@ -534,6 +536,9 @@ fn media_failure(error: twayblade_core::conversation::AttachmentError) -> Servic
 fn conversation_failure(error: ConversationError) -> ServiceError {
     failure(match error {
         ConversationError::EmptyMessage => "Write a message first.",
+        ConversationError::VoiceOnly => {
+            "Voice channels are for talking and do not accept messages."
+        }
         ConversationError::Formatting(_) => {
             "This message is too large to format. Shorten it and try again."
         }
@@ -1470,7 +1475,11 @@ impl Backend {
                         .map(|_| SpaceOutcome::Done)
                         .map_err(space_failure)
                 }
-                Create(draft) => match account.create_room(draft).await {
+                action @ (Create(_) | CreateVoice(_)) => match match action {
+                    Create(draft) => account.create_room(draft).await,
+                    CreateVoice(draft) => account.create_voice_channel(draft).await,
+                    _ => unreachable!(),
+                } {
                     Ok(id) => Ok(SpaceOutcome::Room(id)),
                     Err(twayblade_core::space_actions::SpaceError::ParentLink { room }) => {
                         Ok(SpaceOutcome::PartialRoom(room))

@@ -183,6 +183,9 @@ async fn parse(candidate: Candidate, own: &str) -> Option<IncomingCall> {
         event,
         encryption,
     } = candidate;
+    if crate::channels::ChannelKind::of(&room) == crate::channels::ChannelKind::Voice {
+        return None;
+    }
     let content = &event["content"];
     if room.state() != RoomState::Joined || !is_notification(event["type"].as_str()?) {
         return None;
