@@ -148,7 +148,8 @@ pub(super) struct ThreadSnapshot {
 }
 
 pub(super) enum ThreadAction {
-    Send(String),
+    /// Text and the people picked from the mention list.
+    Send(String, Vec<twayblade_core::rich_text::Mention>),
     /// One stacked attachment, sent as a reply in the thread.
     Attach(twayblade_core::conversation::AttachmentDraft),
     Older,
@@ -370,6 +371,7 @@ pub(super) enum SpaceAction {
     PlanLeave(String),
     Leave(String, std::collections::HashSet<String>),
     Create(twayblade_core::space_actions::CreateRoom),
+    CreateVoice(twayblade_core::space_actions::CreateRoom),
     Dm(String),
     InviteMember(String, String),
     LeaveRoom(String),
@@ -385,6 +387,7 @@ fn space_failure(error: twayblade_core::space_actions::SpaceError) -> ServiceErr
     use twayblade_core::space_actions::SpaceError::*;
     failure(match error {
         InvalidId => "Enter a valid Matrix room or user ID and a room name when creating a room.",
+        SpaceRequired => "Choose a space for this channel. Channels cannot be created in Home.",
         NotSpace => "This ID belongs to a room. Enter a space ID or alias.",
         Unavailable => "This space or invitation is no longer available. Refresh and try again.",
         Permission => "You do not have permission to add rooms to this space.",
@@ -533,6 +536,9 @@ fn media_failure(error: twayblade_core::conversation::AttachmentError) -> Servic
 fn conversation_failure(error: ConversationError) -> ServiceError {
     failure(match error {
         ConversationError::EmptyMessage => "Write a message first.",
+        ConversationError::VoiceOnly => {
+            "Voice channels are for talking and do not accept messages."
+        }
         ConversationError::Formatting(_) => {
             "This message is too large to format. Shorten it and try again."
         }
@@ -974,7 +980,13 @@ impl Backend {
         let shared = self.state.clone();
         let updates = self.updates.clone();
         state.activity_task = Some(self.runtime.spawn(async move {
-            let previews = account.room_previews(&rooms).await;
+            let mut previews = account.room_previews(&rooms).await;
+            // The first request starts tracking rooms the SDK did not follow
+            // yet; their latest event is ready a moment later, so ask once more.
+            if previews.len() < rooms.len() {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                previews = account.room_previews(&rooms).await;
+            }
             let Ok(state) = shared.lock() else {
                 return;
             };
@@ -1308,7 +1320,7 @@ impl Backend {
                 .thread_conversation
                 .clone()
                 .ok_or_else(|| failure("Thread is loading."))?;
-            if matches!(&action, ThreadAction::Send(_)) {
+            if matches!(&action, ThreadAction::Send(..)) {
                 state.history.reset_cursor(&room);
             }
             (conversation, state.epoch)
@@ -1324,8 +1336,8 @@ impl Backend {
         self.runtime
             .block_on(async move {
                 match action {
-                    ThreadAction::Send(body) => {
-                        conversation.send(body.clone()).await?;
+                    ThreadAction::Send(body, mentions) => {
+                        conversation.send(body.clone(), &mentions).await?;
                         self.record_sent(epoch, &room, body);
                         Ok(false)
                     }
@@ -1463,7 +1475,11 @@ impl Backend {
                         .map(|_| SpaceOutcome::Done)
                         .map_err(space_failure)
                 }
-                Create(draft) => match account.create_room(draft).await {
+                action @ (Create(_) | CreateVoice(_)) => match match action {
+                    Create(draft) => account.create_room(draft).await,
+                    CreateVoice(draft) => account.create_voice_channel(draft).await,
+                    _ => unreachable!(),
+                } {
                     Ok(id) => Ok(SpaceOutcome::Room(id)),
                     Err(twayblade_core::space_actions::SpaceError::ParentLink { room }) => {
                         Ok(SpaceOutcome::PartialRoom(room))
@@ -1833,6 +1849,7 @@ impl Backend {
         room_id: String,
         body: String,
         reply: Option<String>,
+        mentions: Vec<twayblade_core::rich_text::Mention>,
     ) -> Result<(), ServiceError> {
         let (conversation, epoch) = {
             let mut state = self
@@ -1852,8 +1869,12 @@ impl Backend {
         self.runtime
             .block_on(async {
                 match &reply {
-                    Some(event) => conversation.send_reply(body.clone(), event).await,
-                    None => conversation.send(body.clone()).await,
+                    Some(event) => {
+                        conversation
+                            .send_reply(body.clone(), event, &mentions)
+                            .await
+                    }
+                    None => conversation.send(body.clone(), &mentions).await,
                 }
             })
             .map_err(conversation_failure)?;
@@ -2307,7 +2328,7 @@ mod tests {
         assert!(client.select_room("!room:example.org".into()).is_err());
         assert!(
             client
-                .send_text("!room:example.org".into(), "test".into(), None)
+                .send_text("!room:example.org".into(), "test".into(), None, Vec::new())
                 .is_err()
         );
         assert!(client.profile("@someone:example.org".into(), None).is_err());

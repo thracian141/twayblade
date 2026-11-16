@@ -21,6 +21,7 @@ Element Call.
 | Storage | SDK SQLite stores, encrypted with a passphrase held in the OS credential store. No plaintext fallback. Logout and failed sign-in delete the local store. |
 | Instances | One running instance per OS user, enforced by a lock file in the app data directory. |
 | Calls | Native (decision 2026-11-11, replacing the Element Call web runtime): MatrixRTC signalling in `core` through the Matrix SDK (call membership, call-key exchange over encrypted to-device messages), media through the LiveKit Rust SDK with end-to-end frame encryption, and a GPUI call interface. Interoperates with Element Call. Legacy `m.call.*` is out of scope for 1.0. |
+| Channels | Text and audio-only voice channels are created inside a joined space. DMs live in Home; subspaces remain separate navigation entries. Voice uses native MatrixRTC with mandatory room/media encryption; live acceptance is pending. |
 | Appearance | Default: system light/dark and system accent, neutral surfaces, contrasting foregrounds. Users can override scheme, accent, fonts, scale and chat style in Settings (M4). |
 | Settings | A native-style Settings window (⌘,) with sections. Preferences are stored locally as plain JSON, never with credentials. Notification rules are Matrix push rules on the server, so they sync with other clients. |
 | Accounts | Several saved accounts with switching (decision 2026-11-15, moved into 1.0 from the deferred list): one OS credential slot per account plus a non-secret index. Phase 1 syncs only the open account. |
@@ -410,6 +411,38 @@ accessibility label. Not fixable here: the saluting face is cut at the right in
 the system's own emoji data on this macOS (AppKit text draws it the same way).
 Verified by captures, an offline click test and compilation; reaction chips and
 other emoji in buttons were not changed. Linux and Windows emoji fonts unchecked.
+
+Back and forward navigation (2026-11-16, `feature/back-navigation-v3`):
+- Mouse Back/Forward (`MouseButton::Navigate`), title-bar `<`/`>` buttons and
+  keyboard shortcuts (`⌘[`/`⌘]` on macOS, `Alt+←`/`Alt+→` on Linux/Windows)
+  navigate workspace history across spaces, rooms, side panels (Search, Thread,
+  Profile) and full-page Space views (`Directory`, `Leave`), syncing
+  cross-space selections, preserving room-scoped reply-quote drafts, clearing
+  transient room edit/emoji/attachment state, and pruning invalid or explicitly
+  closed panels/pages.
+- Hierarchical escape-like Back behavior before popping workspace history: mouse
+  Back closes the image viewer, notifications popover, Add Account sheet (stepping
+  from login options back to server entry before cancelling), full-screen call view,
+  emoji picker, modal sheets (Create Room, New DM, Join Space, Invite Member,
+  Leave Room, Invite Contact, Sign Out), hard-reset confirmation (`SessionResetConfirm`),
+  or steps back through the three-step sign-in flow (login options -> server chooser
+  -> welcome, with Forward restoration).
+- Settings window tracks independent section history via mouse Back/Forward and
+  `⌘[`/`⌘]`, respecting the recovery-key acknowledgement guard across Security and
+  Devices.
+- Verified after rebasing onto `origin/develop` (`f99bc84`, including `#132`
+  Windows 8 MiB stack): `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
+  `cargo test --workspace` (216 passed, 39 ignored), and
+  `cargo test -p twayblade --features capture` (196 passed, 0 failed; offline
+  GPUI tests simulate `MouseButton::Navigate` events, clicks, actions,
+  `add-account-backdrop` occlusion handling, `notifications_open` popover, and
+  `reply_to` quote preservation across Back/Forward).
+- Not yet verified: live homeserver session navigation (including asynchronous
+  `pending_history_thread` reopening on Back/Forward), physical OS mouse
+  Back/Forward hardware buttons, keyboard Back/Forward shortcuts inside a live
+  Settings window, full-screen call Back toggle in a live call, and Linux/Windows
+  builds and runtime.
 
 ## Workspace
 

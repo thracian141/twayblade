@@ -167,6 +167,7 @@ pub struct MessageScroller {
     style: StyleRefinement,
     row_style: StyleRefinement,
     jump_button_label: SharedString,
+    label: Option<SharedString>,
 }
 
 impl MessageScroller {
@@ -184,7 +185,14 @@ impl MessageScroller {
             style: StyleRefinement::default(),
             row_style: StyleRefinement::default(),
             jump_button_label: "Jump to latest".into(),
+            label: None,
         }
+    }
+
+    /// What screen readers call the message list, e.g. "Messages in General".
+    pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     pub fn with_jump_button_label(mut self, label: impl Into<SharedString>) -> Self {
@@ -250,6 +258,7 @@ impl RenderOnce for MessageScroller {
             .id((root_id.clone(), "viewport"))
             // Appended rows are announced as a log region.
             .role(Role::Log)
+            .when_some(self.label.clone(), |this, label| this.aria_label(label))
             .size_full()
             .min_h_0()
             .min_w_0()

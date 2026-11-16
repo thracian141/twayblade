@@ -78,6 +78,8 @@ impl Section {
 }
 pub(crate) struct SettingsWindow {
     pub section: Section,
+    pub(crate) history_back: Vec<Section>,
+    pub(crate) history_forward: Vec<Section>,
     main: Entity<MatrixApp>,
     _observe: Subscription,
 }
@@ -491,14 +493,13 @@ impl MatrixApp {
             section
         };
         if let Some((handle, view)) = existing
-            && view
-                .update(cx, |root, cx| {
-                    root.section = section;
-                    cx.notify();
-                })
-                .is_ok()
             && handle
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, cx| {
+                    let _ = view.update(cx, |root, cx| {
+                        root.select_section(section, true, window, cx);
+                    });
+                    window.activate_window();
+                })
                 .is_ok()
         {
             return;
@@ -558,6 +559,8 @@ impl MatrixApp {
     ) -> SettingsWindow {
         SettingsWindow {
             section,
+            history_back: Vec::new(),
+            history_forward: Vec::new(),
             main,
             _observe: observe,
         }
@@ -1227,6 +1230,20 @@ impl MatrixApp {
                         cx,
                     ),
                     form_row("Sidebar density", sidebar_density, cx),
+                    form_row(
+                        "Show message previews",
+                        switch::Switch::new("room-previews")
+                            .accessibility_label("Show message previews in the sidebar")
+                            .checked(appearance.room_previews)
+                            .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                                this.preferences.appearance.room_previews = *checked;
+                                // A new set of rooms to ask previews for.
+                                this.activity_previews_key.clear();
+                                this.appearance_changed(window, cx);
+                                this.sync_activity_previews();
+                            })),
+                        cx,
+                    ),
                 ],
                 cx,
             ))
@@ -1745,6 +1762,66 @@ impl MatrixApp {
             .into_any_element()
     }
 }
+impl SettingsWindow {
+    fn select_section(
+        &mut self,
+        section: Section,
+        record_history: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.main.read(cx).security_key.is_some() || self.section == section {
+            return;
+        }
+        if record_history {
+            if self.history_back.last() != Some(&self.section) {
+                self.history_back.push(self.section);
+                if self.history_back.len() > 100 {
+                    self.history_back.remove(0);
+                }
+            }
+            self.history_forward.clear();
+        }
+        if matches!(self.section, Section::Security | Section::Devices)
+            && !matches!(section, Section::Security | Section::Devices)
+        {
+            self.main.update(cx, |main, cx| {
+                main.security_input = cx.new(|cx| InputState::new(window, cx).masked(true));
+                main.security_restore = false;
+                main.security_device = None;
+                main.security_reset_confirmation = false;
+                cx.notify();
+            });
+        }
+        self.section = section;
+        cx.notify();
+    }
+
+    fn navigate_section(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.main.read(cx).security_key.is_some() {
+            return;
+        }
+        loop {
+            let next = if back {
+                self.history_back.pop()
+            } else {
+                self.history_forward.pop()
+            };
+            let Some(next) = next else { return };
+            if next == self.section {
+                continue;
+            }
+            if back {
+                self.history_forward.push(self.section);
+            } else {
+                self.history_back.push(self.section);
+            }
+            self.select_section(next, false, window, cx);
+            return;
+        }
+    }
+}
+
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let section = self.section;
@@ -1793,22 +1870,7 @@ impl Render for SettingsWindow {
                                 .child(div().text_size(px(13.)).child(item.label())),
                         )
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            if this.main.read(cx).security_key.is_none() {
-                                if matches!(this.section, Section::Security | Section::Devices)
-                                    && !matches!(item, Section::Security | Section::Devices)
-                                {
-                                    this.main.update(cx, |main, cx| {
-                                        main.security_input =
-                                            cx.new(|cx| InputState::new(window, cx).masked(true));
-                                        main.security_restore = false;
-                                        main.security_device = None;
-                                        main.security_reset_confirmation = false;
-                                        cx.notify();
-                                    });
-                                }
-                                this.section = item;
-                                cx.notify();
-                            }
+                            this.select_section(item, true, window, cx);
                         }))
                 }));
         let (sidebar_bar, content_bar, panel) = self.main.update(cx, |main, cx| {
@@ -1945,11 +2007,8 @@ impl Render for SettingsWindow {
                                 ),
                         ),
                 )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if this.main.read(cx).security_key.is_none() {
-                        this.section = Section::Account;
-                        cx.notify();
-                    }
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.select_section(Section::Account, true, window, cx);
                 })),
         );
         let sidebar = v_flex()
@@ -1968,6 +2027,22 @@ impl Render for SettingsWindow {
             .text_color(cx.theme().foreground)
             .text_size(px(13.))
             .key_context("Twayblade")
+            .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                if let MouseButton::Navigate(direction) = event.button {
+                    this.navigate_section(direction == NavigationDirection::Back, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(
+                cx.listener(|this, _: &crate::app::NavigateBack, window, cx| {
+                    this.navigate_section(true, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::app::NavigateForward, window, cx| {
+                    this.navigate_section(false, window, cx)
+                }),
+            )
             .on_action(
                 cx.listener(|this, _: &crate::app::IncreaseScale, window, cx| {
                     this.main
@@ -1987,10 +2062,7 @@ impl Render for SettingsWindow {
             .on_action(cx.listener(|_, _: &OpenSettings, window, _| window.activate_window()))
             .on_action(cx.listener(
                 |this, _: &crate::shortcuts::ShowKeyboardShortcuts, window, cx| {
-                    if this.main.read(cx).security_key.is_none() {
-                        this.section = Section::Keyboard;
-                        cx.notify();
-                    }
+                    this.select_section(Section::Keyboard, true, window, cx);
                     window.activate_window();
                 },
             ))

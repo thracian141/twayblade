@@ -11,6 +11,7 @@ use crate::auth::Account;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RoomSummary {
+    pub channel_kind: crate::channels::ChannelKind,
     pub id: String,
     pub name: String,
     pub unread: u64,
@@ -22,7 +23,7 @@ pub struct RoomSummary {
     pub direct: bool,
     pub partner: Option<String>,
     pub presence: Option<crate::presence::Presence>,
-    /// `mxc://` avatar, if the room has one.
+    /// `mxc://` room avatar, or the other participant's cached photo for a DM.
     pub avatar: Option<String>,
     /// Highlight (mention/keyword) count, shown as an accent badge.
     pub mentions: u64,
@@ -66,14 +67,20 @@ fn direct_partner_avatar(room: &Room) -> Option<String> {
     let info = room.clone_info();
     let heroes = info.heroes();
     let targets = room.direct_targets();
-    heroes
+    let mut others = heroes
         .iter()
+        .filter(|hero| hero.user_id.as_str() != room.own_user_id().as_str());
+    others
+        .clone()
         .find(|hero| {
             targets
                 .iter()
                 .any(|target| target.as_str() == hero.user_id.as_str())
         })
-        .or_else(|| (heroes.len() == 1).then(|| &heroes[0]))
+        .or_else(|| {
+            let hero = others.next()?;
+            others.next().is_none().then_some(hero)
+        })
         .and_then(|hero| hero.avatar_url.as_ref())
         .map(|url| url.to_string())
 }
@@ -81,6 +88,7 @@ fn direct_partner_avatar(room: &Room) -> Option<String> {
 // Project only changed SDK entries; the service owns membership, recency and sorting.
 fn summary(room: Room) -> RoomSummary {
     RoomSummary {
+        channel_kind: crate::channels::ChannelKind::of(&room),
         recency: room.recency_stamp().map(u64::from).unwrap_or(0),
         id: room.room_id().to_string(),
         name: room
@@ -115,6 +123,28 @@ fn summary(room: Room) -> RoomSummary {
         archived: room.is_low_priority(),
         pinned: room.pinned_event_ids().map_or(0, |ids| ids.len()),
     }
+}
+
+/// Room avatars take precedence. Only use a participant photo for an
+/// unambiguous one-person DM; group chats must not borrow an arbitrary face.
+fn participant_avatar(
+    partner: Option<&str>,
+    own_user: &str,
+    heroes: &[matrix_sdk::RoomHeroWithProfile],
+) -> Option<String> {
+    let mut others = heroes
+        .iter()
+        .filter(|hero| hero.user_id.as_str() != own_user);
+    let hero = if let Some(partner) = partner {
+        others.find(|hero| hero.user_id.as_str() == partner)?
+    } else {
+        let hero = others.next()?;
+        if others.next().is_some() {
+            return None;
+        }
+        hero
+    };
+    hero.avatar_url.as_ref().map(ToString::to_string)
 }
 
 // Dropping the UI subscription must stop both room and encryption sync tasks.
@@ -260,6 +290,16 @@ impl Account {
                 let mut current = snapshot(&rooms, status);
                 current.notifications = rule_snapshot.clone();
                 for room in &mut current.rooms {
+                    if room.direct && room.avatar.is_none()
+                        && let Ok(id) = RoomId::parse(&room.id)
+                        && let Some(sdk_room) = account.client.get_room(&id) {
+                        // In our SDK configuration heroes() reads cached sync
+                        // data, without issuing profile requests per sidebar row.
+                        room.avatar = participant_avatar(
+                            room.partner.as_deref(), sdk_room.own_user_id().as_str(),
+                            &sdk_room.heroes().await,
+                        );
+                    }
                     room.muted = rule_snapshot.room_mode(&room.id) == crate::notifications::RoomMode::Mute;
                     if room.muted { room.unread = 0; }
                 }
@@ -427,8 +467,45 @@ pub enum RoomError {
 
 #[cfg(test)]
 mod restart_tests {
-    use super::restart_delay;
+    use super::{participant_avatar, restart_delay};
     use std::time::Duration;
+
+    fn hero(user: &str, avatar: Option<&str>) -> matrix_sdk::RoomHeroWithProfile {
+        matrix_sdk::RoomHeroWithProfile {
+            user_id: matrix_sdk::ruma::UserId::parse(user).unwrap(),
+            display_name: None,
+            avatar_url: avatar.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn dm_avatar_uses_the_partner_and_never_own_or_ambiguous_photos() {
+        let own = "@me:example.org";
+        let partner = "@other:example.org";
+        let photo = "mxc://example.org/partner";
+        let mut heroes = vec![
+            hero(own, Some("mxc://example.org/own")),
+            hero(partner, Some(photo)),
+        ];
+        assert_eq!(
+            participant_avatar(Some(partner), own, &heroes).as_deref(),
+            Some(photo)
+        );
+        assert_eq!(
+            participant_avatar(None, own, &heroes).as_deref(),
+            Some(photo)
+        );
+        heroes.push(hero("@third:example.org", Some("mxc://example.org/third")));
+        assert!(participant_avatar(None, own, &heroes).is_none());
+        assert_eq!(
+            participant_avatar(Some(partner), own, &heroes).as_deref(),
+            Some(photo)
+        );
+        assert!(participant_avatar(Some("@absent:example.org"), own, &heroes).is_none());
+        assert!(participant_avatar(None, own, &[hero(own, Some(photo))]).is_none());
+        assert!(participant_avatar(Some(partner), own, &[hero(partner, None)]).is_none());
+    }
+
     #[test]
     fn sync_restart_backs_off_exponentially_and_caps() {
         let delays: Vec<_> = (0..9).map(restart_delay).collect();

@@ -234,6 +234,11 @@ fn launch_call(
         .clone()
         .filter(|a| a.instance_id() == expected_account)
         .ok_or(CallError::StaleRequest)?;
+    let voice_channel = account.is_voice_channel(&room);
+    if voice_channel && video {
+        return Err(CallError::InvalidRoom);
+    }
+    let join = join || voice_channel;
     if let Some(id) = invitation
         && !updates.borrow().incoming_calls.iter().any(|c| {
             c.event_id == id

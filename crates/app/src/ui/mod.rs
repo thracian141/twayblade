@@ -8,10 +8,14 @@ mod activity;
 mod chrome;
 #[cfg(all(test, feature = "capture"))]
 pub(crate) use chrome::account_label;
+pub(crate) mod avatar_viewer;
 pub(crate) mod conversation;
+pub(crate) mod explore;
+pub(crate) mod mentions;
 mod panels;
 pub(crate) mod selection_bar;
 mod sign_in;
+pub(crate) mod spotlight;
 mod timeline;
 
 // Secondary windows, overlays and shared pieces.
@@ -69,8 +73,8 @@ const SIDEBAR_WIDTH: f32 = 240.;
 const DETAILS_WIDTH: f32 = 280.;
 const BUBBLE_MAX_WIDTH: f32 = 520.;
 const MEMBER_ROW_HEIGHT: f32 = 30.;
-/// Unified toolbar height, matching a macOS window with a toolbar.
-const TOOLBAR_HEIGHT: f32 = 52.;
+/// Conversation and secondary toolbar row height.
+pub(crate) const TOOLBAR_HEIGHT: f32 = 52.;
 /// Clearance for the traffic lights at the left of the macOS toolbar.
 const TRAFFIC_LIGHTS_WIDTH: f32 = 78.;
 /// A new time marker appears after this much silence within a day.
@@ -344,10 +348,18 @@ impl Render for MatrixApp {
                                     .items_start()
                                     .justify_center()
                                     .pt(px(72.))
+                                    .capture_any_mouse_down(cx.listener(
+                                        |this, event: &MouseDownEvent, window, cx| {
+                                            if let MouseButton::Navigate(direction) = event.button {
+                                                if direction == NavigationDirection::Back {
+                                                    this.close_management_page(window, cx);
+                                                }
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    ))
                                     .on_click(cx.listener(|this, _, window, cx| {
-                                        this.management = None;
-                                        this.restore_focus(window, cx);
-                                        cx.notify();
+                                        this.close_management_page(window, cx);
                                     }))
                                     .child(motion::rise(
                                         div().child(
@@ -371,7 +383,8 @@ impl Render for MatrixApp {
                                                 .on_click(|_, _, cx| cx.stop_propagation())
                                                 .child(self.management_view(cx))
                                                 // Tab cycles inside the sheet; the trap also tracks its focus.
-                                                .focus_trap("management-dialog", &sheet_focus),
+                                                .focus_trap("management-dialog", &sheet_focus)
+                                                .test_support(),
                                         ),
                                         "management-dialog-motion",
                                         reduce,
@@ -383,7 +396,11 @@ impl Render for MatrixApp {
         };
         // The sidebar applied the Archive scroll while building `content`.
         self.reveal_archive = false;
-        let overlay = self.viewer.as_ref().map(|_| self.viewer_view(window, cx));
+        let overlay = if self.avatar_viewer.is_some() {
+            Some(self.avatar_viewer_view(window, cx))
+        } else {
+            self.viewer.as_ref().map(|_| self.viewer_view(window, cx))
+        };
         let workspace = !self.security_open
             && !self.snapshot.user_id.is_empty()
             && self.snapshot.session_state == twayblade_core::auth::SessionState::Active;
@@ -394,8 +411,17 @@ impl Render for MatrixApp {
             .text_size(px(13.))
             .track_focus(&self.focus)
             .key_context("Twayblade")
+            .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                if let MouseButton::Navigate(direction) = event.button {
+                    this.navigate_history(direction == NavigationDirection::Back, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.viewer.is_none() {
+                if this.viewer.is_none()
+                    && !this.spotlight_key(event, window, cx)
+                    && !this.mention_key(event, window, cx)
+                {
                     this.emoji_key(event, window, cx);
                 }
             }))
@@ -468,9 +494,7 @@ impl Render for MatrixApp {
                     .as_ref()
                     .is_some_and(|page| page.kind.is_dialog())
                 {
-                    this.management = None;
-                    this.restore_focus(window, cx);
-                    cx.notify();
+                    this.close_management_page(window, cx);
                 } else {
                     this.dismiss_panel(window, cx);
                 }
@@ -529,7 +553,7 @@ impl Render for MatrixApp {
             // Full-screen flows (sign-in, settings, recovery) still need a title-bar
             // row on macOS: it clears the traffic lights and moves the window.
             .when(!workspace && cfg!(target_os = "macos"), |view| {
-                view.child(self.toolbar("window-toolbar", cx))
+                view.child(self.toolbar("window-toolbar", cx).h(px(32.)))
             })
             .child(
                 div()
@@ -541,6 +565,7 @@ impl Render for MatrixApp {
                         view.child(self.add_account_sheet(cx))
                     })
                     .children(overlay)
+                    .children(self.spotlight_view(window, cx))
                     .when(self.notification_sample, |view| {
                         view.child(self.notification_sample_view(cx))
                     }),

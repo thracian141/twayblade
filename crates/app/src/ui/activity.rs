@@ -77,6 +77,9 @@ pub(crate) fn activity<'a>(
     }
 }
 
+/// The sidebar asks for at most this many previews at once.
+const MAX_SIDEBAR_PREVIEWS: usize = 500;
+
 /// One line under a room: who wrote what, or only the room's count when
 /// notification previews are off.
 pub(crate) fn preview_line(
@@ -165,23 +168,34 @@ impl MatrixApp {
         }
     }
 
-    /// While the popover is open: ask for previews of the rooms it lists
-    /// whenever that list or a room's latest activity changes.
+    /// Ask for latest-message previews of the rooms that show them: every
+    /// sidebar conversation when room previews are on, else the rooms the open
+    /// popover lists. Asks again when that set or a room's activity changes.
     pub(crate) fn sync_activity_previews(&mut self) {
-        if !self.notifications_open || self.preview {
+        if self.preview {
             return;
         }
-        let list = activity(&self.snapshot.rooms, &self.snapshot.invites, &[]);
-        let key: Vec<(String, u64)> = list
-            .mentions
-            .iter()
-            .chain(&list.unread)
-            .map(|room| (room.id.clone(), room.recency))
-            .collect();
+        let key: Vec<(String, u64)> = if self.preferences.appearance.room_previews {
+            self.snapshot
+                .rooms
+                .iter()
+                .take(MAX_SIDEBAR_PREVIEWS)
+                .map(|room| (room.id.clone(), room.recency))
+                .collect()
+        } else if self.notifications_open {
+            let list = activity(&self.snapshot.rooms, &self.snapshot.invites, &[]);
+            list.mentions
+                .iter()
+                .chain(&list.unread)
+                .map(|room| (room.id.clone(), room.recency))
+                .collect()
+        } else {
+            return;
+        };
         if key == self.activity_previews_key {
             return;
         }
-        let rooms = list.room_ids();
+        let rooms = key.iter().map(|(id, _)| id.clone()).collect();
         self.activity_previews_key = key;
         if let Some(backend) = &self.backend {
             backend.request_previews(rooms);

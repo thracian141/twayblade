@@ -158,6 +158,9 @@ impl Account {
             .and_then(|id| self.client.get_room(&id))
             .ok_or(RoomStateError::Unavailable)?;
         // The SDK supplies throttling and the server-side timeout.
+        if crate::channels::ChannelKind::of(&room) == crate::channels::ChannelKind::Voice {
+            return Ok(());
+        }
         room.typing_notice(typing)
             .await
             .map_err(|_| RoomStateError::Typing)

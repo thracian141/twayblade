@@ -26,6 +26,8 @@ use std::{collections::HashSet, sync::Arc};
 pub enum SpaceError {
     #[error("invalid_identifier")]
     InvalidId,
+    #[error("channel_space_required")]
+    SpaceRequired,
     #[error("not_a_space")]
     NotSpace,
     #[error("space_unavailable")]
@@ -172,6 +174,15 @@ pub struct CreateRoom {
     pub encrypted: bool,
     pub parent: Option<String>,
 }
+impl CreateRoom {
+    fn validate(&self) -> Result<(), SpaceError> {
+        let parent = self.parent.as_deref().ok_or(SpaceError::SpaceRequired)?;
+        if self.name.trim().is_empty() || RoomId::parse(parent).is_err() {
+            return Err(SpaceError::InvalidId);
+        }
+        Ok(())
+    }
+}
 impl Default for CreateRoom {
     fn default() -> Self {
         Self {
@@ -180,6 +191,25 @@ impl Default for CreateRoom {
             encrypted: true,
             parent: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod channel_tests {
+    use super::*;
+    #[test]
+    fn channels_require_a_valid_parent_before_any_network_work() {
+        let mut draft = CreateRoom {
+            name: "General".into(),
+            ..Default::default()
+        };
+        assert!(matches!(draft.validate(), Err(SpaceError::SpaceRequired)));
+        draft.parent = Some("invalid".into());
+        assert!(matches!(draft.validate(), Err(SpaceError::InvalidId)));
+        draft.parent = Some("!space:example.org".into());
+        assert!(draft.validate().is_ok());
+        draft.name = "  ".into();
+        assert!(matches!(draft.validate(), Err(SpaceError::InvalidId)));
     }
 }
 #[derive(Clone, Default)]
@@ -298,9 +328,21 @@ impl Account {
         })
     }
     pub async fn create_room(&self, draft: CreateRoom) -> Result<String, SpaceError> {
-        if draft.name.trim().is_empty() {
-            return Err(SpaceError::InvalidId);
-        }
+        self.create_channel(draft, crate::channels::ChannelKind::Text)
+            .await
+    }
+
+    pub async fn create_voice_channel(&self, draft: CreateRoom) -> Result<String, SpaceError> {
+        self.create_channel(draft, crate::channels::ChannelKind::Voice)
+            .await
+    }
+
+    async fn create_channel(
+        &self,
+        draft: CreateRoom,
+        kind: crate::channels::ChannelKind,
+    ) -> Result<String, SpaceError> {
+        draft.validate()?;
         let _parent_sync = if let Some(id) = &draft.parent {
             Some(
                 self.sync_rooms(vec![RoomId::parse(id).map_err(|_| SpaceError::InvalidId)?])
@@ -333,6 +375,27 @@ impl Account {
         request.name = Some(draft.name.trim().into());
         request.topic = (!draft.topic.trim().is_empty()).then(|| draft.topic.trim().into());
         request.preset = Some(create_room::v3::RoomPreset::PrivateChat);
+        if kind == crate::channels::ChannelKind::Voice {
+            let mut creation = create_room::v3::CreationContent::new();
+            creation.room_type = Some(crate::channels::VOICE_ROOM_TYPE.into());
+            request.creation_content =
+                Some(matrix_sdk::ruma::serde::Raw::new(&creation).map_err(|_| SpaceError::Create)?);
+            let mut powers = create_room::RoomPowerLevelsContentOverride::new();
+            powers.users.insert(
+                self.client
+                    .user_id()
+                    .ok_or(SpaceError::Unavailable)?
+                    .to_owned(),
+                100.into(),
+            );
+            powers
+                .events
+                .insert(crate::calls::native::MEMBER_EVENT.into(), 0.into());
+            powers.events.insert("m.room.message".into(), 100.into());
+            powers.events.insert("m.room.encrypted".into(), 100.into());
+            request.power_level_content_override =
+                Some(matrix_sdk::ruma::serde::Raw::new(&powers).map_err(|_| SpaceError::Create)?);
+        }
         if let Some(parent) = &parent {
             // Like Element's "visible to space members": anyone in the parent
             // space can join, instead of an invite-only room nobody can enter.
@@ -343,7 +406,7 @@ impl Account {
                 .to_raw_any(),
             );
         }
-        if draft.encrypted {
+        if draft.encrypted || kind == crate::channels::ChannelKind::Voice {
             request.initial_state.push(
                 InitialStateEvent::with_empty_state_key(
                     RoomEncryptionEventContent::with_recommended_defaults(),

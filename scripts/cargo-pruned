@@ -6,12 +6,14 @@
     scripts/cargo-pruned test --workspace
 
 Each distinct command is one kind of build. For every kind, the artifacts of
-its latest run and the run before it are kept; anything else under
+its latest run is kept; anything else under
 target/<profile>/{deps,build,.fingerprint,incremental} is removed: old
 dependency versions, stale feature combinations, superseded hashes. Kinds
 not run for KIND_DAYS are forgotten. Nothing is pruned after a failed build.
 Pass --dry-run first to see what would go.
 """
+from __future__ import annotations
+
 import contextlib
 import hashlib
 import json
@@ -23,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-KEEP_PER_KIND = 2
+KEEP_PER_KIND = 1
 KIND_DAYS = 7
 HASHED = re.compile(r"^(?:lib)?(.+?)-([0-9a-f]{16})(?:\..*)?$")
 PRUNED = ("deps", "build", ".fingerprint", "incremental")

@@ -12,7 +12,7 @@ apple_env+=("DEVELOPER_DIR=$apple_developer_dir")
 run=false
 preview=false
 profile=debug
-build=(cargo build --locked -p twayblade)
+build=(python3 scripts/cargo-pruned build --locked -p twayblade)
 app_args=()
 for arg in "$@"; do
     case "$arg" in
@@ -47,6 +47,7 @@ fi
 # Remove the superseded helper from a previously built development bundle.
 rm -rf "$app/Contents/Helpers/Twayblade Call.app"
 mkdir -p "$app/Contents/Resources/licenses"
+cp assets/Twayblade.icns "$app/Contents/Resources/"
 cp crates/media/licenses/libwebrtc-a545de4.md "$app/Contents/Resources/licenses/"
 # A stable identity keeps Keychain approval across rebuilds; ad-hoc signing
 # ("-") changes the signature every build. Create one with

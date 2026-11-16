@@ -109,6 +109,76 @@ pub fn compose(body: String) -> Result<RoomMessageEventContent, FormattingError>
     let html = sanitized(&formatted.body)?.to_string();
     Ok(RoomMessageEventContent::text_html(body, html))
 }
+/// A person picked from the mention list, written in the composer as
+/// `@label`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mention {
+    pub user_id: String,
+    pub label: String,
+}
+
+/// Like [`compose`], and each `@label` of a picked person that is still in
+/// the text becomes a matrix.to link in the formatted body and is listed in
+/// `m.mentions`, as Element sends mentions. The plain body stays as typed.
+/// Without mentions left in the text this is exactly [`compose`].
+pub fn compose_with_mentions(
+    body: String,
+    mentions: &[Mention],
+) -> Result<RoomMessageEventContent, FormattingError> {
+    use matrix_sdk::ruma::{OwnedUserId, events::Mentions};
+    let mut picked: Vec<(&Mention, OwnedUserId)> = mentions
+        .iter()
+        .filter(|m| !m.label.is_empty() && body.contains(&format!("@{}", m.label)))
+        .filter_map(|m| {
+            OwnedUserId::try_from(m.user_id.as_str())
+                .ok()
+                .map(|id| (m, id))
+        })
+        .collect();
+    if picked.is_empty() {
+        return compose(body);
+    }
+    if body.trim().is_empty() {
+        return Err(FormattingError::Empty);
+    }
+    if body.len() > 64 * 1024 {
+        return Err(FormattingError::Limit);
+    }
+    // Longest first, so "@Sam Lee" is linked before "@Sam".
+    picked.sort_by_key(|(m, _)| std::cmp::Reverse(m.label.len()));
+    picked.dedup_by(|a, b| a.0.label == b.0.label);
+    let mut source = body.clone();
+    for (mention, id) in &picked {
+        let link = format!(
+            "[{}](https://matrix.to/#/{})",
+            escape_link_text(&mention.label),
+            id
+        );
+        source = source.replace(&format!("@{}", mention.label), &link);
+    }
+    let html = match FormattedBody::markdown(&source) {
+        Some(formatted) => sanitized(&formatted.body)?.to_string(),
+        None => return compose(body),
+    };
+    let mut content = RoomMessageEventContent::text_html(body, html);
+    content.mentions = Some(Mentions::with_user_ids(
+        picked.into_iter().map(|(_, id)| id),
+    ));
+    Ok(content)
+}
+
+/// Markdown link text that shows `label` literally.
+fn escape_link_text(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    for ch in label.chars() {
+        if matches!(ch, '\\' | '[' | ']' | '*' | '_' | '`' | '<' | '>') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 fn attr(node: &NodeRef, key: &str) -> Option<String> {
     node.as_element()?
         .attrs
@@ -314,6 +384,54 @@ mod tests {
         indices(&other.nodes, &mut result);
         assert_eq!(result, vec![0]);
     }
+    #[test]
+    fn mentions_link_people_and_list_them_in_m_mentions() {
+        let sam = Mention {
+            user_id: "@sam:example.org".into(),
+            label: "Sam".into(),
+        };
+        let sam_lee = Mention {
+            user_id: "@samlee:example.org".into(),
+            label: "Sam [Lee]".into(),
+        };
+        let gone = Mention {
+            user_id: "@alex:example.org".into(),
+            label: "Alex".into(),
+        };
+        let content = compose_with_mentions(
+            "hi @Sam and @Sam [Lee]".into(),
+            &[sam.clone(), sam_lee, gone],
+        )
+        .unwrap();
+        assert_eq!(content.body(), "hi @Sam and @Sam [Lee]");
+        let MessageType::Text(text) = &content.msgtype else {
+            panic!("text message");
+        };
+        let html = &text.formatted.as_ref().unwrap().body;
+        assert!(
+            html.contains(r#"<a href="https://matrix.to/#/@sam:example.org">Sam</a>"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"<a href="https://matrix.to/#/@samlee:example.org">Sam [Lee]</a>"#),
+            "{html}"
+        );
+        let ids: Vec<_> = content
+            .mentions
+            .as_ref()
+            .unwrap()
+            .user_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"@sam:example.org".to_owned()));
+        // A mention deleted from the text, or none at all, sends as before.
+        let plain = compose_with_mentions("hello".into(), &[sam]).unwrap();
+        assert!(plain.mentions.is_none());
+        assert_eq!(plain.body(), compose("hello".into()).unwrap().body());
+    }
+
     #[test]
     fn markdown_round_trip_has_html_and_exact_plain_fallback() {
         let body = "**bold** *italic* `code`\n\n```rust\nlet a = 1;\n```\n\n[link](https://example.org)\n\n- item\n\n> quote";

@@ -12,6 +12,8 @@ use matrix_sdk::{
     },
 };
 pub type ServerName = OwnedServerName;
+/// How a directory room can be joined, so the frontend can offer Join or Ask to Join.
+pub use matrix_sdk::ruma::room::JoinRuleKind as JoinRule;
 pub type ThirdPartyNetwork = String;
 #[derive(Clone)]
 pub struct Token {

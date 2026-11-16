@@ -59,6 +59,16 @@ impl MatrixApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_thread_event_inner(root, true, window, cx);
+    }
+
+    pub(crate) fn open_thread_event_inner(
+        &mut self,
+        root: String,
+        record_history: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let row = self
             .snapshot
             .messages
@@ -70,13 +80,30 @@ impl MatrixApp {
                 event_id: Some(root),
                 ..Default::default()
             });
-        self.open_thread_root(row, window, cx);
+        self.open_thread_root_inner(row, record_history, window, cx);
     }
 
     fn open_thread_root(&mut self, root: Message, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_thread_root_inner(root, true, window, cx);
+    }
+
+    fn open_thread_root_inner(
+        &mut self,
+        root: Message,
+        record_history: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(room) = self.navigation.selected_room.clone() else {
             return;
         };
+        // People picked in another thread's reply don't carry over.
+        self.thread_mentions.clear();
+        self.mention_completion = None;
+        let before = self.current_nav_page();
+        self.pending_history_thread = None;
+        self.management = None;
+        self.search_open = false;
         self.close_profile(cx);
         self.details_open = false;
         self.thread_request = self.thread_request.wrapping_add(1);
@@ -103,6 +130,8 @@ impl MatrixApp {
                         if matches!(event, InputEvent::Change) {
                             let text = state.read(cx).value().to_string();
                             this.edit_text_changed(true, &text);
+                            let cursor = state.read(cx).cursor();
+                            this.update_mention_completion(true, text, cursor);
                         }
                         if matches!(event, InputEvent::PressEnter { .. }) {
                             this.send_thread(window, cx);
@@ -172,6 +201,9 @@ impl MatrixApp {
             receipt_retry_after: std::time::Instant::now(),
             attachments: Default::default(),
         });
+        if record_history {
+            self.record_history(before);
+        }
         if !self.preview {
             let account = self.snapshot.account_instance;
             self.job(
@@ -372,6 +404,7 @@ impl MatrixApp {
         let root = t.root.event_id.clone().expect("remote root");
         let request = t.request;
         let staged = std::mem::take(&mut t.attachments.drafts);
+        let mentions = std::mem::take(&mut self.thread_mentions);
         let stack_request = t.attachments.request;
         let account = self.snapshot.account_instance;
         self.job(
@@ -392,7 +425,13 @@ impl MatrixApp {
                     }
                 }
                 let result = if has_text {
-                    b.thread_action(room, root, account, request, ThreadAction::Send(body))
+                    b.thread_action(
+                        room,
+                        root,
+                        account,
+                        request,
+                        ThreadAction::Send(body, mentions),
+                    )
                 } else {
                     Ok(false)
                 };
@@ -566,6 +605,13 @@ impl MatrixApp {
                     .px(px(12.))
                     .pt(px(4.))
                     .pb(px(12.))
+                    .children(self.mention_panel(true, cx).map(|panel| {
+                        crate::ui::motion::rise(
+                            div().pb(px(4.)).child(panel),
+                            "thread-mention-list-motion",
+                            self.snapshot.reduce_motion,
+                        )
+                    }))
                     .children(self.edit_bar(true, cx))
                     .child(
                         // The main composer's box: the field, then a toolbar
