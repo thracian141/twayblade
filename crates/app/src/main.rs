@@ -276,6 +276,7 @@ fn main() {
                     }
                     if args.iter().any(|arg| arg == "--preview-viewer") { view.preview_viewer(window,cx); }
                     if args.iter().any(|arg| arg == "--preview-leave") { view.open_management(ui::spaces::ManageKind::LeaveRoom("general".into()),window,cx); }
+                    if args.iter().any(|arg| arg == "--preview-dm") { view.open_management(ui::spaces::ManageKind::Dm,window,cx); }
                     if args.iter().any(|arg| arg == "--preview-invite-contact") { view.open_management(ui::spaces::ManageKind::InviteContact,window,cx); }
                     if args.iter().any(|arg| arg == "--preview-archive") { for room in view.snapshot.rooms.iter_mut().filter(|room| room.id == "announcements") { room.archived = true; } view.show_archive(window, cx); }
                     if args.iter().any(|arg| arg == "--preview-message-focus") { view.focus_next_area(true, window, cx); view.focus_next_area(true, window, cx); if let Some(id) = view.message_cursor(false).map(str::to_owned) { view.step_message(false, &id, ui::focus::Step::Previous, window, cx); } }

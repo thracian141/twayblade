@@ -2775,6 +2775,60 @@ fn screen_picker_lists_sources_and_opens_from_the_share_button(cx: &mut TestAppC
     });
 }
 
+#[test]
+fn known_people_come_from_direct_conversations_most_recent_first() {
+    use crate::ui::spaces::known_people;
+    let dm = |id: &str, name: &str, partner: &str, recency| crate::backend::Room {
+        id: id.into(),
+        name: name.into(),
+        direct: true,
+        partner: Some(partner.into()),
+        recency,
+        ..Default::default()
+    };
+    let rooms = vec![
+        dm("a", "Alex", "@alex:example.org", 1),
+        dm("s", "Sam", "@sam:example.org", 5),
+        // A second conversation with Sam does not list Sam twice.
+        dm("s2", "Sam", "@sam:example.org", 3),
+        crate::backend::Room {
+            id: "g".into(),
+            name: "General".into(),
+            ..Default::default()
+        },
+    ];
+    let names = |people: Vec<crate::ui::spaces::KnownPerson>| {
+        people.into_iter().map(|p| p.name).collect::<Vec<_>>()
+    };
+    assert_eq!(names(known_people(&rooms, "", &[], 6)), ["Sam", "Alex"]);
+    assert_eq!(names(known_people(&rooms, "ALEX", &[], 6)), ["Alex"]);
+    assert_eq!(names(known_people(&rooms, "sam:example", &[], 6)), ["Sam"]);
+    // Members of the room being invited to are left out.
+    assert_eq!(
+        names(known_people(&rooms, "", &["@sam:example.org".into()], 6)),
+        ["Alex"]
+    );
+    assert_eq!(names(known_people(&rooms, "", &[], 1)), ["Sam"]);
+}
+
+#[gpui_kit::test]
+fn direct_message_dialog_reopens_a_known_conversation(cx: &mut TestAppContext) {
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_management(crate::ui::spaces::ManageKind::Dm, window, cx)
+        });
+        window.render_frame(cx);
+        window.click("suggest-@alex:example.org", cx);
+    })
+    .expect("pick a known person");
+    cx.update(|cx| {
+        let app = app.read(cx);
+        assert!(app.management.is_none());
+        assert_eq!(app.navigation.selected_room.as_deref(), Some("alex"));
+    });
+}
+
 #[gpui_kit::test]
 fn status_message_dialog_opens_on_the_current_status(cx: &mut TestAppContext) {
     let (window, app) = preview_window(cx);
