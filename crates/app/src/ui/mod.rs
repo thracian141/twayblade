@@ -11,6 +11,7 @@ pub(crate) use chrome::account_label;
 pub(crate) mod avatar_viewer;
 pub(crate) mod conversation;
 pub(crate) mod explore;
+pub(crate) mod mentions;
 mod panels;
 pub(crate) mod selection_bar;
 mod sign_in;
@@ -415,7 +416,7 @@ impl Render for MatrixApp {
                 }
             }))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.viewer.is_none() {
+                if this.viewer.is_none() && !this.mention_key(event, window, cx) {
                     this.emoji_key(event, window, cx);
                 }
             }))

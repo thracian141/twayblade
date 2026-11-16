@@ -148,7 +148,8 @@ pub(super) struct ThreadSnapshot {
 }
 
 pub(super) enum ThreadAction {
-    Send(String),
+    /// Text and the people picked from the mention list.
+    Send(String, Vec<twayblade_core::rich_text::Mention>),
     /// One stacked attachment, sent as a reply in the thread.
     Attach(twayblade_core::conversation::AttachmentDraft),
     Older,
@@ -1314,7 +1315,7 @@ impl Backend {
                 .thread_conversation
                 .clone()
                 .ok_or_else(|| failure("Thread is loading."))?;
-            if matches!(&action, ThreadAction::Send(_)) {
+            if matches!(&action, ThreadAction::Send(..)) {
                 state.history.reset_cursor(&room);
             }
             (conversation, state.epoch)
@@ -1330,8 +1331,8 @@ impl Backend {
         self.runtime
             .block_on(async move {
                 match action {
-                    ThreadAction::Send(body) => {
-                        conversation.send(body.clone()).await?;
+                    ThreadAction::Send(body, mentions) => {
+                        conversation.send(body.clone(), &mentions).await?;
                         self.record_sent(epoch, &room, body);
                         Ok(false)
                     }
@@ -1839,6 +1840,7 @@ impl Backend {
         room_id: String,
         body: String,
         reply: Option<String>,
+        mentions: Vec<twayblade_core::rich_text::Mention>,
     ) -> Result<(), ServiceError> {
         let (conversation, epoch) = {
             let mut state = self
@@ -1858,8 +1860,12 @@ impl Backend {
         self.runtime
             .block_on(async {
                 match &reply {
-                    Some(event) => conversation.send_reply(body.clone(), event).await,
-                    None => conversation.send(body.clone()).await,
+                    Some(event) => {
+                        conversation
+                            .send_reply(body.clone(), event, &mentions)
+                            .await
+                    }
+                    None => conversation.send(body.clone(), &mentions).await,
                 }
             })
             .map_err(conversation_failure)?;
@@ -2313,7 +2319,7 @@ mod tests {
         assert!(client.select_room("!room:example.org".into()).is_err());
         assert!(
             client
-                .send_text("!room:example.org".into(), "test".into(), None)
+                .send_text("!room:example.org".into(), "test".into(), None, Vec::new())
                 .is_err()
         );
         assert!(client.profile("@someone:example.org".into(), None).is_err());

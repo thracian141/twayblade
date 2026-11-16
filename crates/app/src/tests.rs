@@ -864,6 +864,40 @@ fn emoji_cell_click_reaches_the_button_under_its_glyph(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn typing_at_lists_members_and_return_mentions_one(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestEventExt;
+    let (window, app) = preview_window(cx);
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.within("composer-panel").click("input-state", cx);
+        window.input("thanks @sa", cx);
+    })
+    .expect("type a mention");
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("mention-list").visible());
+        window.key_down("enter", false, cx);
+        assert_eq!(
+            window
+                .within("composer-panel")
+                .find_by_label("Message")
+                .value(),
+            Some("thanks @Sam ")
+        );
+    })
+    .expect("pick with Return");
+    cx.update(|cx| {
+        let app = app.read(cx);
+        assert!(app.mention_completion.is_none());
+        let room = app.snapshot.selected_room.clone();
+        let picked = app.mentions.get(&room).cloned().unwrap_or_default();
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].user_id, "@sam:preview.invalid");
+        assert_eq!(picked[0].label, "Sam");
+    });
+}
+
+#[gpui_kit::test]
 fn shortcode_skin_tone_and_reaction_share_the_picker(cx: &mut TestAppContext) {
     use gpui_kit::test::TestEventExt;
     let (window, app) = preview_window(cx);

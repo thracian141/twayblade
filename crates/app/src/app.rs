@@ -441,6 +441,11 @@ pub(super) struct MatrixApp {
     pub(crate) avatar_viewer: Option<crate::ui::avatar_viewer::AvatarViewer>,
     /// Explore Rooms: the public server being browsed; None is your own.
     pub(crate) explore_server: Option<String>,
+    /// The open `@` list and the people picked in each composer.
+    pub(crate) mention_completion: Option<crate::ui::mentions::MentionCompletion>,
+    /// Per room, like the drafts they belong to.
+    pub(crate) mentions: HashMap<String, Vec<twayblade_core::rich_text::Mention>>,
+    pub(crate) thread_mentions: Vec<twayblade_core::rich_text::Mention>,
     pub viewer_request: u64,
     pub reveal_image: Option<String>,
     pub image_focus: std::cell::RefCell<HashMap<String, FocusHandle>>,
@@ -842,6 +847,9 @@ impl MatrixApp {
             viewer: None,
             avatar_viewer: None,
             explore_server: None,
+            mention_completion: None,
+            mentions: HashMap::new(),
+            thread_mentions: Vec::new(),
             viewer_request: 0,
             reveal_image: None,
             image_focus: std::cell::RefCell::new(HashMap::new()),
@@ -1785,6 +1793,7 @@ impl MatrixApp {
     }
 
     fn activate_composer(&mut self, room: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.mention_completion = None;
         if let Some((state, _)) = self.composers.get(&room) {
             self.composer = state.clone();
             return;
@@ -1812,6 +1821,11 @@ impl MatrixApp {
                         let text = state.read(cx).value().to_string();
                         this.edit_text_changed(false, &text);
                         this.update_emoji_completion(
+                            state.read(cx).value().to_string(),
+                            state.read(cx).cursor(),
+                        );
+                        this.update_mention_completion(
+                            false,
                             state.read(cx).value().to_string(),
                             state.read(cx).cursor(),
                         );
@@ -1952,6 +1966,8 @@ impl MatrixApp {
             .then(|| self.open_reply().map(|reply| reply.event_id.clone()))
             .flatten();
         let sent_reply = reply.clone();
+        let sent_mentions = self.take_mentions(false);
+        self.mention_completion = None;
         let staged = std::mem::take(&mut self.attachments.drafts);
         let attachment_request = self.attachments.request;
         self.job(
@@ -1968,7 +1984,7 @@ impl MatrixApp {
                     }
                 }
                 let result = match sent_body {
-                    Some(text) => backend.send_text(sent_room, text, sent_reply),
+                    Some(text) => backend.send_text(sent_room, text, sent_reply, sent_mentions),
                     None => Ok(()),
                 };
                 (result, Vec::new())

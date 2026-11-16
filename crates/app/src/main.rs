@@ -276,6 +276,11 @@ fn main() {
                     }
                     if args.iter().any(|arg| arg == "--preview-viewer") { view.preview_viewer(window,cx); }
                     if args.iter().any(|arg| arg == "--preview-leave") { view.open_management(ui::spaces::ManageKind::LeaveRoom("general".into()),window,cx); }
+                    if args.iter().any(|arg| arg == "--preview-mention") {
+                        let text = "Thanks @";
+                        view.composer.update(cx, |state, cx| state.set_value(text, window, cx));
+                        view.update_mention_completion(false, text.into(), text.len());
+                    }
                     if args.iter().any(|arg| arg == "--preview-explore") { view.open_explore(window,cx); }
                     if args.iter().any(|arg| arg == "--preview-dm") { view.open_management(ui::spaces::ManageKind::Dm,window,cx); }
                     if args.iter().any(|arg| arg == "--preview-invite-contact") { view.open_management(ui::spaces::ManageKind::InviteContact,window,cx); }
