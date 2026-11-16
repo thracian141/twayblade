@@ -266,7 +266,15 @@ impl MatrixApp {
         rail.into_any_element()
     }
 
-    pub(crate) fn room_row(&self, room: &Room, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn room_row(
+        &self,
+        room: &Room,
+        order: Option<crate::ui::ordering::RowOrder>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let scope = self.order_scope();
+        let moved = order.is_some() && self.sidebar_order.is_moved(&scope, &room.id);
+        let has_local = order.is_some() && self.sidebar_order.has_local(&scope);
         let palette = theme::palette(cx);
         let density = self.preferences.appearance.sidebar_density;
         let selected = self.navigation.selected_room.as_ref() == Some(&room.id);
@@ -297,7 +305,9 @@ impl MatrixApp {
                 .flex()
                 .justify_center()
                 .child(
-                    Icon::new(if room.public {
+                    Icon::new(if room.info_channel {
+                        IconName::ScrollText
+                    } else if room.public {
                         IconName::Hash
                     } else {
                         IconName::Lock
@@ -351,6 +361,12 @@ impl MatrixApp {
                             })
                             .child(room.name.clone()),
                     )
+                    .when(moved, |row| {
+                        row.child(self.local_order_mark(
+                            SharedString::from(format!("room-moved-{}", room.id)),
+                            cx,
+                        ))
+                    })
                     .children(badge),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -387,6 +403,49 @@ impl MatrixApp {
                         }),
                     )
                     .separator();
+                // Personal order without dragging, for the keyboard.
+                if let Some(order) = &order {
+                    for (label, neighbour) in [
+                        ("Move Up for Me", order.up.clone()),
+                        ("Move Down for Me", order.down.clone()),
+                    ] {
+                        let view = weak.clone();
+                        let (scope, section, room) =
+                            (scope.clone(), order.section, room_id.clone());
+                        let (shown, shared) = (order.shown.clone(), order.shared.clone());
+                        menu = menu.item(
+                            PopupMenuItem::new(label)
+                                .disabled(neighbour.is_none())
+                                .on_click(move |_, _, cx| {
+                                    let Some(target) = &neighbour else { return };
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.drop_room(
+                                            &crate::ui::ordering::RoomDrag {
+                                                scope: scope.clone(),
+                                                section,
+                                                id: room.clone(),
+                                                name: String::new(),
+                                                local: true,
+                                            },
+                                            target,
+                                            &shown,
+                                            &shared,
+                                            cx,
+                                        )
+                                    });
+                                }),
+                        );
+                    }
+                    if has_local {
+                        let view = weak.clone();
+                        menu = menu.item(PopupMenuItem::new("Reset My Order").on_click(
+                            move |_, _, cx| {
+                                let _ = view.update(cx, |this, cx| this.reset_local_order(cx));
+                            },
+                        ));
+                    }
+                    menu = menu.separator();
+                }
                 if !available {
                     return menu;
                 }
@@ -419,20 +478,42 @@ impl MatrixApp {
 
     /// One collapsible sidebar section with an uppercase header and an optional
     /// hover "+" action.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn sidebar_section(
         &self,
+        scope: &str,
         key: &'static str,
         label: &'static str,
         rooms: Vec<&Room>,
         add: Option<(&'static str, crate::ui::spaces::ManageKind)>,
+        reorderable: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        use crate::ui::ordering::{DragGhost, RoomDrag, SectionDrag};
         let density = self.preferences.appearance.sidebar_density;
         let collapsed = self.collapsed_sections.contains(key);
         let group_name = SharedString::from(format!("section-{key}"));
+        let local = reorderable && self.local_reorder_active();
+        let shared = self.sidebar_order.shared_ids(scope, key, &rooms);
+        let rooms = self.sidebar_order.arrange(scope, key, rooms);
+        let shown: Vec<String> = rooms.iter().map(|room| room.id.clone()).collect();
+        let drag_rooms = reorderable && (local || self.can_reorder_shared(scope, key));
+        let target = cx.theme().primary.opacity(0.14);
+        let section_moved = reorderable && self.sidebar_order.section_moved(scope, key);
         let header = h_flex()
+            .id(SharedString::from(format!("section-header-{key}")))
             .group(group_name.clone())
             .h(px(24.))
+            .when(local, |header| {
+                let drag = SectionDrag {
+                    scope: scope.to_owned(),
+                    section: key,
+                    label,
+                };
+                header
+                    .cursor_grab()
+                    .on_drag(drag, |drag, _, _, cx| DragGhost::new(drag.label, true, cx))
+            })
             .child(
                 div()
                     .id(SharedString::from(format!("section-toggle-{key}")))
@@ -474,6 +555,11 @@ impl MatrixApp {
                         cx.notify();
                     })),
             )
+            .when(section_moved, |header| {
+                header.child(div().pr(px(4.)).child(
+                    self.local_order_mark(SharedString::from(format!("section-moved-{key}")), cx),
+                ))
+            })
             .when_some(add, |header, (tooltip, kind)| {
                 header.child(
                     div()
@@ -493,20 +579,81 @@ impl MatrixApp {
                 )
             });
         let selected = self.navigation.selected_room.as_deref();
+        let section_scope = scope.to_owned();
+        let drop_scope = scope.to_owned();
         let mut section = v_flex()
             .id(SharedString::from(format!("sidebar-section-{key}")))
             .role(Role::Group)
             .aria_label(label)
             .pt(px(density.section_gap()))
+            .rounded(px(6.))
+            // A section dropped on another takes its place (personal order only).
+            .can_drop(move |dragged, _, _| {
+                dragged
+                    .downcast_ref::<SectionDrag>()
+                    .is_some_and(|drag| drag.scope == section_scope && drag.section != key)
+            })
+            .drag_over::<SectionDrag>(move |style, _, _, _| style.bg(target))
+            .on_drop(cx.listener(move |this, drag: &SectionDrag, _, cx| {
+                if drag.scope == drop_scope {
+                    this.drop_section(drag, key, cx);
+                }
+            }))
             .child(header);
         for room in rooms {
             // Collapsed sections still show the open room and anything needing attention.
             let keep = !collapsed
                 || selected == Some(room.id.as_str())
                 || (!room.muted && (room.mentions > 0 || room.unread > 0));
-            if keep {
-                section = section.child(self.room_row(room, cx));
+            if !keep {
+                continue;
             }
+            let ix = shown.iter().position(|id| *id == room.id).unwrap_or(0);
+            let neighbours = (
+                ix.checked_sub(1).and_then(|ix| shown.get(ix)).cloned(),
+                shown.get(ix + 1).cloned(),
+            );
+            let order = reorderable.then(|| crate::ui::ordering::RowOrder {
+                section: key,
+                shown: shown.clone(),
+                shared: shared.clone(),
+                up: neighbours.0,
+                down: neighbours.1,
+            });
+            let row = self.room_row(room, order, cx);
+            let drag = RoomDrag {
+                scope: scope.to_owned(),
+                section: key,
+                id: room.id.clone(),
+                name: room.name.clone(),
+                local,
+            };
+            let drop_scope = scope.to_owned();
+            let target_id = room.id.clone();
+            let accept_id = room.id.clone();
+            let (shown_ids, shared_ids) = (shown.clone(), shared.clone());
+            section = section.child(
+                div()
+                    .id(SharedString::from(format!("room-drag-{}", room.id)))
+                    .rounded(px(6.))
+                    .when(drag_rooms, |row| {
+                        row.on_drag(drag, |drag, _, _, cx| {
+                            DragGhost::new(drag.name.clone(), drag.local, cx)
+                        })
+                    })
+                    // Rooms move within their own section; another section would
+                    // mean changing Favourites or the direct-message flag.
+                    .can_drop(move |dragged, _, _| {
+                        dragged.downcast_ref::<RoomDrag>().is_some_and(|drag| {
+                            drag.scope == drop_scope && drag.section == key && drag.id != accept_id
+                        })
+                    })
+                    .drag_over::<RoomDrag>(move |style, _, _, _| style.bg(target))
+                    .on_drop(cx.listener(move |this, drag: &RoomDrag, _, cx| {
+                        this.drop_room(drag, &target_id, &shown_ids, &shared_ids, cx)
+                    }))
+                    .child(row),
+            );
         }
         section.into_any_element()
     }
@@ -721,36 +868,49 @@ impl MatrixApp {
         if !self.snapshot.invites.is_empty() {
             list = list.child(self.invite_section(cx));
         }
-        let favourites: Vec<&Room> = visible.iter().filter(|room| room.favourite).collect();
-        let channels: Vec<&Room> = visible
+        // Search results are not an arrangement; reordering applies to the
+        // sections of Home or a space.
+        let reorderable = query.is_empty();
+        let show_tip_button =
+            !self.preferences.sidebar.reorder_tip_dismissed && !self.reorder_tip_hidden;
+        if reorderable && self.local_reorder_active() {
+            list = list.child(self.local_reorder_banner(cx));
+        }
+        let mut favourites: Vec<&Room> = visible.iter().filter(|room| room.favourite).collect();
+        let mut channels: Vec<&Room> = visible
             .iter()
             .filter(|room| !room.favourite && !room.direct)
             .collect();
-        let direct: Vec<&Room> = visible
+        let mut direct: Vec<&Room> = visible
             .iter()
             .filter(|room| !room.favourite && room.direct)
             .collect();
-        if !favourites.is_empty() {
-            list =
-                list.child(self.sidebar_section("favourites", "Favourites", favourites, None, cx));
-        }
-        if !channels.is_empty() {
-            list = list.child(self.sidebar_section(
-                "rooms",
-                "Rooms",
-                channels,
-                Some(("Create Room…", crate::ui::spaces::ManageKind::Create)),
-                cx,
-            ));
-        }
-        if !direct.is_empty() {
-            list = list.child(self.sidebar_section(
-                "direct",
-                "Direct messages",
-                direct,
-                Some(("New Direct Message…", crate::ui::spaces::ManageKind::Dm)),
-                cx,
-            ));
+        let scope = self.order_scope();
+        for key in self.sidebar_order.sections(&scope) {
+            let (label, rooms, add) = match key {
+                "favourites" => ("Favourites", std::mem::take(&mut favourites), None),
+                "rooms" => (
+                    "Rooms",
+                    std::mem::take(&mut channels),
+                    Some(("Create Room…", crate::ui::spaces::ManageKind::Create)),
+                ),
+                _ => (
+                    "Direct messages",
+                    std::mem::take(&mut direct),
+                    Some(("New Direct Message…", crate::ui::spaces::ManageKind::Dm)),
+                ),
+            };
+            if !rooms.is_empty() {
+                list = list.child(self.sidebar_section(
+                    &scope,
+                    key,
+                    label,
+                    rooms,
+                    add,
+                    reorderable,
+                    cx,
+                ));
+            }
         }
         if visible.is_empty() {
             let empty = if !query.is_empty() {
@@ -799,6 +959,22 @@ impl MatrixApp {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(title),
                     )
+                    // How to arrange rooms just for yourself, until dismissed.
+                    .when(show_tip_button, |header| {
+                        header.child(
+                            Button::new("reorder-info")
+                                .ghost()
+                                .size(px(26.))
+                                .icon(IconName::Info)
+                                .accessibility_label("About arranging rooms")
+                                .tooltip("Arranging Rooms")
+                                .selected(self.reorder_tip_open)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.reorder_tip_open = !this.reorder_tip_open;
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .child(
                         Button::new("new-room")
                             .ghost()
@@ -826,7 +1002,17 @@ impl MatrixApp {
                             })),
                     ),
             )
+            .when(show_tip_button && self.reorder_tip_open, |sidebar| {
+                sidebar.child(self.reorder_tip(cx))
+            })
             .child(list)
+            // The reorder key only counts while the pointer is over the sidebar.
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if this.sidebar_hovered != *hovered {
+                    this.sidebar_hovered = *hovered;
+                    cx.notify();
+                }
+            }))
             .into_any_element()
     }
 

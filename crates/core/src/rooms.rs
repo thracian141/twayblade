@@ -33,6 +33,12 @@ pub struct RoomSummary {
     pub pinned: usize,
     /// Server-provided activity ordering (sliding sync `bump_stamp`).
     pub recency: u64,
+    /// An information channel: a read-mostly room of formatted blocks (rules,
+    /// announcements) with no chat composer.
+    ///
+    /// Placeholder contract: sync does not read a room marker yet, so live
+    /// rooms are always `false`; only offline sample data sets it.
+    pub info_channel: bool,
 }
 
 #[derive(Clone)]
@@ -86,6 +92,8 @@ fn summary(room: Room) -> RoomSummary {
         public: room.is_public().unwrap_or(false),
         favourite: room.is_favourite(),
         pinned: room.pinned_event_ids().map_or(0, |ids| ids.len()),
+        // Not read from room state yet; see the field's contract.
+        info_channel: false,
     }
 }
 

@@ -306,6 +306,66 @@ Linux and Windows CI passed on `36f850a`; macOS CI was switched to `macos-15`
 
 ## Progress
 
+Sidebar arranging: shared and personal order (2026-11-14, Claude; requested by
+the user):
+- Plain drag changes the shared order and is offered only where you can edit the
+  space (`can_add_rooms`), in its Rooms section. Until the backend can read and
+  write the space's child order, this works **only in the offline preview**
+  (sample state; nothing is sent). In a live account a plain drag does nothing.
+- Personal order: hold Ctrl (Command ⌘ on macOS, where Control-click is a
+  secondary click; not verified on a Mac) with the pointer over the sidebar
+  to drag rooms within their section, or whole sections (Favourites, Rooms, Direct
+  messages), in Home or any space. While the key is held the sidebar shows an
+  alert banner. Moved rooms and sections show a circled "!" ("Locally different
+  from the server's ordering"). Room context menus add Move Up/Down for Me and
+  Reset My Order, so this works without dragging.
+- An info button in the sidebar header explains the gesture; its tip offers
+  Hide for Now (this session) and Don't Show Again (saved in preferences as
+  `sidebar.reorder_tip_dismissed`).
+- Contracts and gaps: personal orders are kept in memory for the session only.
+  They name rooms, so they don't belong in the plain preferences file; they need
+  account-scoped storage (e.g. Matrix account data, which would also sync to your
+  other devices). The shared order needs `SpaceSummary` to expose the ordered
+  children and an action that writes `m.space.child` `order` with a permission
+  check. The sidebar still uses the incoming (recency) order as the shared order.
+- Verification (Windows x64, offline): fmt, strict Clippy (`twayblade`,
+  `twayblade-core`, all targets), app tests 78 passed (4 new ordering tests). Drag
+  and modifier behaviour were not exercised by an automated test or checked by
+  hand yet; no macOS check.
+
+Information channels, view and editor (2026-11-14, Claude; requested by the user,
+outside the original 1.0 scope):
+- A room kind for rules and info, like Discord's rules channels. The timeline
+  shows each message as a full-width block card (rendered rich text, author, date,
+  Edited) in a 720 px reading column, still through the virtualized scroller. No
+  chat composer and no file drop: the footer explains who can post and, for
+  admins/moderators, offers **New Block**. Sidebar and header use a scroll icon.
+- Block editor sheet: a formatting toolbar (heading, bold, italic, strikethrough,
+  code, link, bulleted/numbered list, quote, table, divider) that wraps the
+  selection or prefixes the touched lines, with a Markdown source beside a live
+  preview. The preview uses `rich_text::compose_preview`, the same Markdown →
+  sanitized HTML → rich-text path as a sent and received message, so it shows
+  exactly what members get. Publishing sends a normal formatted `m.room.message`
+  through `send_text`, readable in Element. Escape or Cancel closes it.
+- Create Room offers Chat or Information; Information cannot be created yet and
+  says so (Create stays disabled for it).
+- Offline preview: "Rules & info" in Design team, with sample blocks including a
+  table; publishing in the preview adds the block on this device only.
+- Contracts for the technical layer (placeholders, not live behaviour):
+  `RoomSummary.info_channel` is always `false` from sync. Needed: a room-state
+  marker set at creation (with power levels so only moderators can send) and
+  read during sync (sliding-sync required state); creation via `CreateRoom`; and
+  the user's real send permission, which the view currently approximates from
+  the Admin/Moderator member role. Without power levels, other clients can
+  still post ordinary messages; they render as blocks here.
+- Not built: editing or deleting a block from the card, reordering.
+- Verification (Windows x64, offline only): `cargo fmt --check`, strict Clippy
+  for `twayblade` and `twayblade-core` (all targets), app tests (74 passed,
+  including toolbar formatting and table round-trip), core `rich_text` tests
+  (5 passed). The preview was launched and the build ran; the layout was not
+  captured or checked on macOS. No live server, Element or physical platform
+  acceptance was performed.
+
 Call view technical contracts (2026-11-13, Codex):
 - Call-scoped participant `id`, receiver `playback` gain (0–2) and independent
   local mute in `Snapshot.call.participants`; bounded ticket-aware backend actions.

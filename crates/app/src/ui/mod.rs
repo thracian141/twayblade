@@ -13,11 +13,13 @@ mod timeline;
 // Secondary windows, overlays and shared pieces.
 pub(crate) mod attachments;
 pub(crate) mod avatars;
+pub(crate) mod blocks;
 pub(crate) mod calls;
 pub(crate) mod editing;
 pub(crate) mod emoji;
 pub(crate) mod keyboard;
 pub(crate) mod motion;
+pub(crate) mod ordering;
 pub(crate) mod security;
 pub(crate) mod settings;
 pub(crate) mod spaces;
@@ -151,6 +153,8 @@ fn secret_store_name() -> &'static str {
 impl Render for MatrixApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.notification_window_active = window.is_window_active();
+        // Re-read each frame so a key released in another window doesn't stick.
+        self.reorder_key = ordering::local_key(&window.modifiers());
         self.notification_config();
         if self.details_open
             && self.info_tab == crate::app::InfoTab::Files
@@ -340,7 +344,28 @@ impl Render for MatrixApp {
                                         reduce,
                                     )),
                             )
-                        }),
+                        })
+                        // The block editor of an information channel, over a dimmed window.
+                        .children(self.block_editor_view(cx).map(|editor| {
+                            div()
+                                .id("block-editor-backdrop")
+                                .absolute()
+                                .inset_0()
+                                .occlude()
+                                .bg(gpui_kit::black().opacity(0.35))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(motion::rise(
+                                    div()
+                                        .w(px(900.))
+                                        .max_w(relative(0.94))
+                                        .h(relative(0.84))
+                                        .child(editor),
+                                    "block-editor-motion",
+                                    reduce,
+                                ))
+                        })),
                 )
                 .into_any_element()
         };
@@ -355,6 +380,14 @@ impl Render for MatrixApp {
             .text_size(px(13.))
             .track_focus(&self.focus)
             .key_context("Twayblade")
+            // Holding the personal-reorder key switches the sidebar's drag mode.
+            .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _, cx| {
+                let held = ordering::local_key(&event.modifiers);
+                if held != this.reorder_key {
+                    this.reorder_key = held;
+                    cx.notify();
+                }
+            }))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.viewer.is_none() {
                     this.emoji_key(event, window, cx);
@@ -401,6 +434,8 @@ impl Render for MatrixApp {
             .on_action(cx.listener(|this, _: &CloseProfile, window, cx| {
                 if this.viewer.is_some() {
                     this.close_viewer(window, cx);
+                } else if this.block_editor.is_some() {
+                    this.close_block_editor(window, cx);
                 } else if this.emoji_picker.is_some() {
                     this.close_emoji(window, cx);
                 } else if this.edit_session.is_some() {

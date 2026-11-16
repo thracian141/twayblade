@@ -278,6 +278,16 @@ pub(super) struct MatrixApp {
     pub thread_request: u64,
     pub management: Option<crate::ui::spaces::Management>,
     pub management_request: u64,
+    /// The open block editor of an information channel.
+    pub block_editor: Option<crate::ui::blocks::BlockEditor>,
+    /// Shared (sample) and personal sidebar orders for this session.
+    pub sidebar_order: crate::ui::ordering::SidebarOrder,
+    /// The personal-reorder key is held, and the pointer is over the sidebar.
+    pub reorder_key: bool,
+    pub sidebar_hovered: bool,
+    /// The arranging tip is expanded, or hidden for this session.
+    pub reorder_tip_open: bool,
+    pub reorder_tip_hidden: bool,
     directory_action_request: u64,
     pub viewer: Option<crate::ui::viewer::Viewer>,
     pub viewer_request: u64,
@@ -607,6 +617,12 @@ impl MatrixApp {
             thread_request: 0,
             management: None,
             management_request: 0,
+            block_editor: None,
+            sidebar_order: Default::default(),
+            reorder_key: false,
+            sidebar_hovered: false,
+            reorder_tip_open: false,
+            reorder_tip_hidden: false,
             directory_action_request: 0,
             viewer: None,
             viewer_request: 0,
@@ -1196,6 +1212,8 @@ impl MatrixApp {
             return;
         }
         self.emoji_picker = None;
+        // A block draft belongs to the channel it was started in.
+        self.block_editor = None;
         self.end_edit(window, cx);
         self.clear_attachment();
         self.reset_pagination();
@@ -1224,6 +1242,18 @@ impl MatrixApp {
         if self.preview {
             self.snapshot.selected_room = id.clone();
             self.snapshot.timeline_ready = true;
+            // Sample information channels show sample blocks, not the chat.
+            if self
+                .snapshot
+                .rooms
+                .iter()
+                .any(|room| room.id == id && room.info_channel)
+            {
+                self.snapshot.messages = model::sample_blocks();
+                self.groups = model::grouped(&self.snapshot.messages);
+                self.scroller
+                    .update(cx, |state, cx| state.reset(self.groups.len(), cx));
+            }
         }
         self.queue_selection_focus(Some(id), event, window, cx);
         cx.notify();

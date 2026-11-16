@@ -15,6 +15,7 @@ pub(super) struct Preferences {
     pub appearance: Appearance,
     pub chat: Chat,
     pub notifications: DeviceNotifications,
+    pub sidebar: Sidebar,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -23,8 +24,17 @@ impl Default for Preferences {
             appearance: Default::default(),
             chat: Default::default(),
             notifications: Default::default(),
+            sidebar: Default::default(),
         }
     }
+}
+
+/// Sidebar hints. Personal room orders are not stored here: they name rooms.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct Sidebar {
+    /// "Don't Show Again" on the tip about arranging rooms just for yourself.
+    pub reorder_tip_dismissed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

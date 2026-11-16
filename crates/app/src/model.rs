@@ -115,6 +115,7 @@ pub(super) fn preview(home: bool, count: usize) -> Snapshot {
             avatar: None,
             can_add_rooms: true,
             room_ids: [
+                "rules".into(),
                 "general".into(),
                 "research".into(),
                 "critique".into(),
@@ -130,6 +131,15 @@ pub(super) fn preview(home: bool, count: usize) -> Snapshot {
             ..Default::default()
         },
         rooms: vec![
+            Room {
+                id: "rules".into(),
+                name: "Rules & info".into(),
+                topic: Some("Read this first".into()),
+                encrypted: true,
+                public: true,
+                info_channel: true,
+                ..Default::default()
+            },
             Room {
                 id: "general".into(),
                 name: "General".into(),
@@ -310,7 +320,196 @@ pub(super) fn preview(home: bool, count: usize) -> Snapshot {
     ];
     snapshot.members_state = MembersState::Ready;
     snapshot.typing = vec!["@alex:preview.invalid".into()];
+    if std::env::args().any(|arg| arg == "--preview-demo") {
+        add_demo_data(&mut snapshot);
+    }
     snapshot
+}
+
+/// Sample-only extras for `--preview-demo`: more spaces, group chats, direct
+/// messages and a longer conversation, to judge the layout with a busy account.
+fn add_demo_data(snapshot: &mut Snapshot) {
+    let room = |id: &str, name: &str| Room {
+        id: id.into(),
+        name: name.into(),
+        encrypted: true,
+        ..Default::default()
+    };
+    let space = |id: &str, name: &str, rooms: &[&str]| Space {
+        id: id.into(),
+        name: name.into(),
+        level: 0,
+        avatar: None,
+        can_add_rooms: true,
+        room_ids: rooms.iter().map(|r| r.to_string()).collect(),
+    };
+    snapshot.spaces.push(space(
+        "eng",
+        "Engineering",
+        &["backend", "frontend", "oncall", "code-review", "releases"],
+    ));
+    snapshot.spaces.push(space(
+        "social",
+        "Weekend crew",
+        &["hiking", "board-games", "food"],
+    ));
+    snapshot.rooms.extend([
+        Room {
+            unread: 12,
+            mentions: 2,
+            ..room("backend", "Backend")
+        },
+        Room {
+            unread: 1,
+            ..room("frontend", "Frontend")
+        },
+        Room {
+            unread: 27,
+            mentions: 5,
+            pinned: 1,
+            ..room("oncall", "On-call")
+        },
+        Room {
+            favourite: true,
+            ..room("code-review", "Code review")
+        },
+        Room {
+            muted: true,
+            public: true,
+            ..room("releases", "Releases")
+        },
+        Room {
+            unread: 4,
+            topic: Some("Saturday trail ideas".into()),
+            ..room("hiking", "Hiking")
+        },
+        Room {
+            ..room("board-games", "Board games")
+        },
+        Room {
+            unread: 9,
+            muted: true,
+            ..room("food", "Food & recipes")
+        },
+        Room {
+            unread: 1,
+            direct: true,
+            ..room("sam", "Sam")
+        },
+        Room {
+            direct: true,
+            favourite: true,
+            ..room("priya", "Priya")
+        },
+        Room {
+            direct: true,
+            ..room("jordan", "Jordan")
+        },
+        Room {
+            unread: 3,
+            mentions: 1,
+            ..room("trip", "Lisbon trip (Alex, Sam, Priya)")
+        },
+        Room {
+            direct: true,
+            ..room("mei", "Mei Lin")
+        },
+    ]);
+    let people = [
+        ("@alex:preview.invalid", "Alex"),
+        ("@sam:preview.invalid", "Sam"),
+        ("@priya:preview.invalid", "Priya"),
+        ("@jordan:preview.invalid", "Jordan"),
+    ];
+    let lines = [
+        "Did anyone look at the flaky sync test from last night?",
+        "Yes, it's the store lock. I'll push a fix after lunch.",
+        "Nice. Can we also bump the timeout in CI?",
+        "Already done in #482, just needs a review.",
+        "On it. Two small comments, otherwise looks good.",
+        "Thanks! Merging once the checks are green.",
+        "Reminder: release freeze starts Thursday at noon.",
+        "Got it. I'll cut the candidate on Wednesday evening.",
+        "Anyone up for a Saturday hike? Forecast looks clear.",
+        "Count me in. Should we carpool from the station?",
+        "Sounds good. I'll bring snacks and the thermos.",
+        "Perfect, meet at 8:30 by the main entrance.",
+    ];
+    let base = 1_794_300_000_000 + 6 * 30_000;
+    for (ix, line) in lines.iter().enumerate() {
+        let (user_id, name) = people[ix % people.len()];
+        let outgoing = ix % 5 == 4;
+        snapshot.messages.push(Message {
+            id: format!("sample-{}", 6 + ix),
+            event_id: Some(format!("$sample-{}:preview.invalid", 6 + ix)),
+            sender: if outgoing {
+                snapshot.user_id.clone()
+            } else {
+                user_id.into()
+            },
+            display_name: if outgoing { "You" } else { name }.into(),
+            body: (*line).into(),
+            kind: MessageKind::Text,
+            timestamp_ms: base + ix as i64 * 90_000,
+            delivery: DeliveryState::Remote,
+            ..Default::default()
+        });
+    }
+    for (user_id, name) in [people[2], people[3]] {
+        snapshot.members.push(Member {
+            user_id: user_id.into(),
+            display_name: name.into(),
+            role: MemberRole::Member,
+            avatar: None,
+            ..Default::default()
+        });
+    }
+}
+
+/// Sample blocks for an offline information channel, built through the same
+/// Markdown → HTML → rich-text path as a sent block.
+pub(super) fn sample_blocks() -> Vec<Message> {
+    let blocks = [
+        (
+            "@alex:preview.invalid",
+            "Alex",
+            "## Welcome to the Design team\n\nThis space is where we share work in progress, ask for critique and plan releases. Start in **General**; use **Critique** when you want feedback on something specific.",
+        ),
+        (
+            "@alex:preview.invalid",
+            "Alex",
+            "## Rules\n\n1. Be kind and assume good intent.\n2. Keep feedback about the work, not the person.\n3. No spam, ads or self-promotion.\n4. Use threads for long discussions.\n5. Don't share work marked _confidential_ outside this space.\n\n> Breaking these rules may get you removed from the space.",
+        ),
+        (
+            "@sam:preview.invalid",
+            "Sam",
+            "## Who to ask\n\n| Topic | Person | Channel |\n| --- | --- | --- |\n| Access and invites | Alex | General |\n| Design reviews | Sam | Critique |\n| Releases | Priya | Announcements |\n",
+        ),
+        (
+            "@sam:preview.invalid",
+            "Sam",
+            "## Useful links\n\n- [Brand guidelines](https://example.org/brand)\n- [Component library](https://example.org/components)\n- Review slots: Tuesdays and Thursdays, `14:00–15:00`\n\n---\n\nMissing something? Ask a moderator.",
+        ),
+    ];
+    blocks
+        .into_iter()
+        .enumerate()
+        .map(|(ix, (sender, name, body))| Message {
+            id: format!("sample-block-{ix}"),
+            event_id: Some(format!("$sample-block-{ix}:preview.invalid")),
+            sender: sender.into(),
+            display_name: name.into(),
+            body: body.into(),
+            rich: twayblade_core::rich_text::compose_preview(body)
+                .ok()
+                .flatten(),
+            kind: MessageKind::Text,
+            timestamp_ms: 1_794_000_000_000 + ix as i64 * 86_400_000,
+            edited: ix == 1,
+            delivery: DeliveryState::Remote,
+            ..Default::default()
+        })
+        .collect()
 }
 
 pub(super) fn typing_text(snapshot: &Snapshot) -> String {

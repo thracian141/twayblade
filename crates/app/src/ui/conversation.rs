@@ -73,7 +73,9 @@ impl MatrixApp {
             )
             .into_any_element()
         } else {
-            Icon::new(if room.public {
+            Icon::new(if room.info_channel {
+                IconName::ScrollText
+            } else if room.public {
                 IconName::Hash
             } else {
                 IconName::Lock
@@ -228,6 +230,8 @@ impl MatrixApp {
             div().flex_1().min_h_0().into_any_element()
         } else if self.groups.is_empty() && load != RoomLoad::Ready {
             self.room_load_error(load, cx)
+        } else if self.groups.is_empty() && room.info_channel {
+            self.blocks_empty(&room, cx)
         } else if self.groups.is_empty() {
             v_flex()
                 .flex_1()
@@ -245,9 +249,16 @@ impl MatrixApp {
                 .into_any_element()
         } else {
             let weak = cx.weak_entity();
+            let blocks = room.info_channel;
             MessageScroller::new("messages", self.scroller.clone(), move |ix, _, cx| {
-                weak.update(cx, |this, cx| this.message_group(ix, cx))
-                    .unwrap_or_else(|_| div().into_any_element())
+                weak.update(cx, |this, cx| {
+                    if blocks {
+                        this.block_group(ix, cx)
+                    } else {
+                        this.message_group(ix, cx)
+                    }
+                })
+                .unwrap_or_else(|_| div().into_any_element())
             })
             .flex_1()
             .min_h_0()
@@ -280,185 +291,195 @@ impl MatrixApp {
                 .text_color(muted)
                 .child(text)
         };
-        let composer = v_flex()
-            .px(px(20.))
-            .pt(px(2.))
-            .pb(px(6.))
-            .gap(px(4.))
-            .children(notices.into_iter().enumerate().map(note))
-            .when(self.emoji_picker.is_some(), |view| {
-                view.child(motion::rise(
-                    div().child(self.emoji_panel(cx)),
-                    "emoji-picker-motion",
-                    self.snapshot.reduce_motion,
-                ))
-            })
-            // A composer box: the message field, then a quiet toolbar row with
-            // attach, emoji and send, as in Slack and Mail.
-            .child(
-                v_flex()
-                    .rounded(px(9.))
-                    .border_1()
-                    .border_color(cx.theme().input)
-                    .bg(palette.field)
-                    .when(stacked, |view| view.child(self.attachment_tray(cx)))
-                    .children(self.edit_bar(false, cx))
-                    .child(
-                        self.composer_keys(div().id("composer-panel"), false, cx)
-                            // The text field binds ↑/↓ itself; take them first only when they
-                            // start or step an edit.
-                            // Escape inside the field cancels an edit; the field would
-                            // otherwise take the key.
-                            .capture_action(cx.listener(
-                                |this, _: &gpui_kit::component::input::Escape, window, cx| {
-                                    if this
-                                        .edit_session
-                                        .as_ref()
-                                        .is_some_and(|session| !session.in_thread)
-                                    {
-                                        this.end_edit(window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
-                            .capture_action(cx.listener(
-                                |this, _: &gpui_kit::component::input::MoveUp, window, cx| {
-                                    if this.edit_navigation_key("up", false, window, cx) {
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
-                            .capture_action(cx.listener(
-                                |this, _: &gpui_kit::component::input::MoveDown, window, cx| {
-                                    if this.edit_navigation_key("down", false, window, cx) {
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
-                            .min_w_0()
-                            .px(px(12.))
-                            .pt(px(8.))
-                            .pb(px(2.))
-                            .child(
-                                Textarea::new(&self.composer)
-                                    .accessibility_id("composer")
-                                    .appearance(false)
-                                    .w_full()
-                                    .disabled(!editable)
-                                    .aria_label("Message")
-                                    .on_paste(move |clipboard, window, cx| {
-                                        paste_target
-                                            .update(cx, |this, cx| {
-                                                this.paste_attachment(clipboard, window, cx)
-                                            })
-                                            .unwrap_or(false)
-                                    }),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .h(px(34.))
-                            .px(px(6.))
-                            .gap(px(2.))
-                            .child(div().flex_1())
-                            .child(
-                                Button::new("attach-file")
-                                    .ghost()
-                                    .size(px(26.))
-                                    .icon(IconName::Paperclip)
-                                    .accessibility_label("Attach file")
-                                    .tooltip("Attach File…")
-                                    .disabled(
-                                        !editable
-                                            || self.preview
-                                            || self.attachment_drafts.len()
-                                                + self.attachment_pending
-                                                >= crate::ui::attachments::MAX_ATTACHMENTS,
-                                    )
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.choose_attachment(window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("emoji-open")
-                                    .ghost()
-                                    .size(px(26.))
-                                    .icon(IconName::FaceSlightlySmiling)
-                                    .accessibility_label("Choose emoji")
-                                    .tooltip("Emoji")
-                                    .disabled(!editable && !self.preview)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.toggle_emoji(window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("send")
-                                    .primary()
-                                    .h(px(26.))
-                                    .w(px(30.))
-                                    .ml(px(4.))
-                                    .rounded(px(6.))
-                                    .icon(IconName::Send)
-                                    .accessibility_label(if editing {
-                                        "Save edit"
-                                    } else {
-                                        "Send message"
-                                    })
-                                    .tooltip(if editing { "Save  ↩" } else { "Send  ↩" })
-                                    .disabled(
-                                        !ready
-                                            || (empty && self.attachment_drafts.is_empty())
-                                            || self.attachment_pending > 0
-                                            || self.sending.contains(&room.id),
-                                    )
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.send(window, cx)),
-                                    ),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .h(px(18.))
-                    .pl(px(4.))
-                    .text_size(px(11.))
-                    .text_color(muted)
-                    .when(!typing.is_empty(), |line| {
-                        // Who is typing (avatars), a pulse, then the accessible text.
-                        let reduce = self.snapshot.reduce_motion;
-                        let typers: Vec<_> = self.snapshot.typing.iter().take(3).cloned().collect();
-                        line.child(motion::rise(
-                            h_flex()
-                                .gap(px(6.))
-                                .child(h_flex().children(typers.iter().enumerate().map(
-                                    |(index, user)| {
-                                        div()
-                                            .when(index > 0, |avatar| avatar.ml(px(-4.)))
-                                            .rounded_full()
-                                            .border_1()
-                                            .border_color(cx.theme().background)
-                                            .child(self.avatar_image(
-                                                user.avatar.as_deref(),
-                                                &user.user_id,
-                                                &user.name,
-                                                14.,
-                                                7.,
-                                                cx,
-                                            ))
+        // Information channels have no message field, only the way to add a block.
+        let composer = if room.info_channel {
+            self.blocks_footer(&room, notices, cx)
+        } else {
+            v_flex()
+                .px(px(20.))
+                .pt(px(2.))
+                .pb(px(6.))
+                .gap(px(4.))
+                .children(notices.into_iter().enumerate().map(note))
+                .when(self.emoji_picker.is_some(), |view| {
+                    view.child(motion::rise(
+                        div().child(self.emoji_panel(cx)),
+                        "emoji-picker-motion",
+                        self.snapshot.reduce_motion,
+                    ))
+                })
+                // A composer box: the message field, then a quiet toolbar row with
+                // attach, emoji and send, as in Slack and Mail.
+                .child(
+                    v_flex()
+                        .rounded(px(9.))
+                        .border_1()
+                        .border_color(cx.theme().input)
+                        .bg(palette.field)
+                        .when(stacked, |view| view.child(self.attachment_tray(cx)))
+                        .children(self.edit_bar(false, cx))
+                        .child(
+                            self.composer_keys(div().id("composer-panel"), false, cx)
+                                // The text field binds ↑/↓ itself; take them first only when they
+                                // start or step an edit.
+                                // Escape inside the field cancels an edit; the field would
+                                // otherwise take the key.
+                                .capture_action(cx.listener(
+                                    |this, _: &gpui_kit::component::input::Escape, window, cx| {
+                                        if this
+                                            .edit_session
+                                            .as_ref()
+                                            .is_some_and(|session| !session.in_thread)
+                                        {
+                                            this.end_edit(window, cx);
+                                            cx.stop_propagation();
+                                        }
                                     },
-                                )))
-                                .child(motion::typing_dots(muted, reduce))
+                                ))
+                                .capture_action(cx.listener(
+                                    |this, _: &gpui_kit::component::input::MoveUp, window, cx| {
+                                        if this.edit_navigation_key("up", false, window, cx) {
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                ))
+                                .capture_action(cx.listener(
+                                    |this, _: &gpui_kit::component::input::MoveDown, window, cx| {
+                                        if this.edit_navigation_key("down", false, window, cx) {
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                ))
+                                .min_w_0()
+                                .px(px(12.))
+                                .pt(px(8.))
+                                .pb(px(2.))
                                 .child(
-                                    div()
-                                        .id("typing-notice")
-                                        .child(typing.clone())
-                                        .test_support(),
+                                    Textarea::new(&self.composer)
+                                        .accessibility_id("composer")
+                                        .appearance(false)
+                                        .w_full()
+                                        .disabled(!editable)
+                                        .aria_label("Message")
+                                        .on_paste(move |clipboard, window, cx| {
+                                            paste_target
+                                                .update(cx, |this, cx| {
+                                                    this.paste_attachment(clipboard, window, cx)
+                                                })
+                                                .unwrap_or(false)
+                                        }),
                                 ),
-                            "typing-row",
-                            reduce,
-                        ))
-                    }),
-            );
+                        )
+                        .child(
+                            h_flex()
+                                .h(px(34.))
+                                .px(px(6.))
+                                .gap(px(2.))
+                                .child(div().flex_1())
+                                .child(
+                                    Button::new("attach-file")
+                                        .ghost()
+                                        .size(px(26.))
+                                        .icon(IconName::Paperclip)
+                                        .accessibility_label("Attach file")
+                                        .tooltip("Attach File…")
+                                        .disabled(
+                                            !editable
+                                                || self.preview
+                                                || self.attachment_drafts.len()
+                                                    + self.attachment_pending
+                                                    >= crate::ui::attachments::MAX_ATTACHMENTS,
+                                        )
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.choose_attachment(window, cx)
+                                        })),
+                                )
+                                .child(
+                                    Button::new("emoji-open")
+                                        .ghost()
+                                        .size(px(26.))
+                                        .icon(IconName::FaceSlightlySmiling)
+                                        .accessibility_label("Choose emoji")
+                                        .tooltip("Emoji")
+                                        .disabled(!editable && !self.preview)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.toggle_emoji(window, cx)
+                                        })),
+                                )
+                                .child(
+                                    Button::new("send")
+                                        .primary()
+                                        .h(px(26.))
+                                        .w(px(30.))
+                                        .ml(px(4.))
+                                        .rounded(px(6.))
+                                        .icon(IconName::Send)
+                                        .accessibility_label(if editing {
+                                            "Save edit"
+                                        } else {
+                                            "Send message"
+                                        })
+                                        .tooltip(if editing { "Save  ↩" } else { "Send  ↩" })
+                                        .disabled(
+                                            !ready
+                                                || (empty && self.attachment_drafts.is_empty())
+                                                || self.attachment_pending > 0
+                                                || self.sending.contains(&room.id),
+                                        )
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.send(window, cx)
+                                            }),
+                                        ),
+                                ),
+                        ),
+                )
+                .child(
+                    div()
+                        .h(px(18.))
+                        .pl(px(4.))
+                        .text_size(px(11.))
+                        .text_color(muted)
+                        .when(!typing.is_empty(), |line| {
+                            // Who is typing (avatars), a pulse, then the accessible text.
+                            let reduce = self.snapshot.reduce_motion;
+                            let typers: Vec<_> =
+                                self.snapshot.typing.iter().take(3).cloned().collect();
+                            line.child(motion::rise(
+                                h_flex()
+                                    .gap(px(6.))
+                                    .child(h_flex().children(typers.iter().enumerate().map(
+                                        |(index, user)| {
+                                            div()
+                                                .when(index > 0, |avatar| avatar.ml(px(-4.)))
+                                                .rounded_full()
+                                                .border_1()
+                                                .border_color(cx.theme().background)
+                                                .child(self.avatar_image(
+                                                    user.avatar.as_deref(),
+                                                    &user.user_id,
+                                                    &user.name,
+                                                    14.,
+                                                    7.,
+                                                    cx,
+                                                ))
+                                        },
+                                    )))
+                                    .child(motion::typing_dots(muted, reduce))
+                                    .child(
+                                        div()
+                                            .id("typing-notice")
+                                            .child(typing.clone())
+                                            .test_support(),
+                                    ),
+                                "typing-row",
+                                reduce,
+                            ))
+                        }),
+                )
+                .into_any_element()
+        };
+        let info_channel = room.info_channel;
 
         v_flex()
             .flex_1()
@@ -472,9 +493,14 @@ impl MatrixApp {
             })
             .child(body)
             .child(composer)
-            .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                this.add_attachments(paths.0.iter().cloned(), window, cx);
-            }))
+            .on_drop::<ExternalPaths>(cx.listener(
+                move |this, paths: &ExternalPaths, window, cx| {
+                    // No composer to stage files for in an information channel.
+                    if !info_channel {
+                        this.add_attachments(paths.0.iter().cloned(), window, cx);
+                    }
+                },
+            ))
             .into_any_element()
     }
 

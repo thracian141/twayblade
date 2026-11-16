@@ -109,6 +109,12 @@ pub fn compose(body: String) -> Result<RoomMessageEventContent, FormattingError>
     let html = sanitized(&formatted.body)?.to_string();
     Ok(RoomMessageEventContent::text_html(body, html))
 }
+/// What [`compose`] would send, as the timeline will show it: Markdown, then
+/// sanitized HTML, then rich text. `None` when the body has no formatting and
+/// is sent as plain text.
+pub fn compose_preview(body: &str) -> Result<Option<std::sync::Arc<RichText>>, FormattingError> {
+    Ok(message(&compose(body.to_owned())?.msgtype))
+}
 fn attr(node: &NodeRef, key: &str) -> Option<String> {
     node.as_element()?
         .attrs
@@ -422,5 +428,27 @@ mod tests {
             Err(FormattingError::Limit)
         ));
         assert!(incoming(&FormattedBody::html("x".repeat(MAX_HTML + 1))).is_none());
+    }
+    #[test]
+    fn compose_preview_matches_what_is_sent_including_tables() {
+        // Information-channel blocks rely on headings, lists and tables
+        // surviving Markdown, sanitizing and projection.
+        let block = "## Rules\n\n1. Be kind\n2. No spam\n\n| Role | Who |\n| --- | --- |\n| Admin | Alex |\n";
+        let rich = compose_preview(block).unwrap().expect("formatted");
+        let has = |kind: BlockKind| {
+            any(
+                &rich.nodes,
+                &|n| matches!(n, RichNode::Block { kind: k, .. } if *k == kind),
+            )
+        };
+        assert!(has(BlockKind::Heading(2)));
+        assert!(has(BlockKind::List {
+            ordered: true,
+            start: 1
+        }));
+        assert!(has(BlockKind::Table));
+        assert!(has(BlockKind::TableCell { header: true }));
+        assert!(compose_preview("plain words").unwrap().is_none());
+        assert!(matches!(compose_preview("  "), Err(FormattingError::Empty)));
     }
 }

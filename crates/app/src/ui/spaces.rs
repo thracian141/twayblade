@@ -5,6 +5,7 @@ use crate::{
     app::MatrixApp,
     backend::{SpaceAction, SpaceOutcome},
 };
+use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     component::{
@@ -47,6 +48,8 @@ pub(crate) struct Management {
     pub topic: Entity<InputState>,
     pub encrypted: bool,
     pub parent: Option<String>,
+    /// Create Room: an information channel of blocks rather than a chat.
+    pub info_channel: bool,
 }
 impl MatrixApp {
     pub fn open_management(
@@ -109,6 +112,7 @@ impl MatrixApp {
             topic,
             encrypted: true,
             parent: initial_parent,
+            info_channel: false,
         });
         if self.preview {
             if let Some(page) = &mut self.management {
@@ -599,11 +603,87 @@ impl MatrixApp {
                 );
             }
             ManageKind::Create => {
+                let kind = |id: &'static str,
+                            icon: IconName,
+                            title: &'static str,
+                            detail: &'static str,
+                            info: bool| {
+                    let selected = page.info_channel == info;
+                    Button::new(id)
+                        .outline()
+                        .flex_1()
+                        .min_w_0()
+                        .h_auto()
+                        .p(px(10.))
+                        .rounded(px(8.))
+                        .justify_start()
+                        .items_start()
+                        .selected(selected)
+                        .toggled(selected)
+                        .accessibility_label(format!("{title} room"))
+                        .disabled(page.busy)
+                        .child(
+                            v_flex()
+                                .min_w_0()
+                                .items_start()
+                                .child(
+                                    h_flex()
+                                        .gap(px(6.))
+                                        .child(Icon::new(icon).size(px(14.)))
+                                        .child(
+                                            div().font_weight(FontWeight::SEMIBOLD).child(title),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .pt(px(2.))
+                                        .text_size(px(12.))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .whitespace_normal()
+                                        .text_left()
+                                        .child(detail),
+                                ),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(p) = &mut this.management {
+                                p.info_channel = info;
+                            }
+                            cx.notify();
+                        }))
+                };
                 body = body
                     .child("Room name")
                     .child(Input::new(&page.name).aria_label("Room name"))
                     .child("Topic (optional)")
-                    .child(Input::new(&page.topic).aria_label("Room topic"));
+                    .child(Input::new(&page.topic).aria_label("Room topic"))
+                    .child("Type")
+                    .child(
+                        h_flex()
+                            .gap(px(8.))
+                            .items_stretch()
+                            .child(kind(
+                                "room-kind-chat",
+                                IconName::MessagesSquare,
+                                "Chat",
+                                "Everyone can send messages.",
+                                false,
+                            ))
+                            .child(kind(
+                                "room-kind-info",
+                                IconName::ScrollText,
+                                "Information",
+                                "Rules and announcements as formatted blocks. Members read; moderators post.",
+                                true,
+                            )),
+                    );
+                if page.info_channel {
+                    body = body.child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Information channels can't be created on a server from Twayblade yet."),
+                    );
+                }
                 body = body.child(
                     Button::new("room-encryption")
                         .outline()
@@ -656,6 +736,7 @@ impl MatrixApp {
                         .disabled(
                             self.preview
                                 || page.busy
+                                || page.info_channel
                                 || page.name.read(cx).value().trim().is_empty(),
                         )
                         .on_click(cx.listener(move |this, _, window, cx| {
